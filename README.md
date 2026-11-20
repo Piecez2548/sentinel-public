@@ -1,26 +1,50 @@
 # SENTINEL
 
-แพลตฟอร์ม **Security Monitoring + Observability** สำหรับแอดมินคนเดียว ตาม SENTINEL Blueprint v1.0 (ทาง B: ฟีเจอร์ครบ ใช้ชิ้นส่วนน้อย) — ดูเอกสารใน [`docs/`](docs)
+**English** · [ภาษาไทย](README.th.md)
 
-เฝ้าดู **PC Windows เครื่องนี้** และ **เว็บไซต์/API ของคุณ** ตรวจจับเหตุผิดปกติด้วยกฎที่ตรวจสอบได้ แจ้งเตือนทาง Telegram และบันทึก Incident พร้อมหลักฐาน
+A self-hosted **security monitor for one Windows PC and your websites**, built for a single admin. It watches the PC's protection, logs and installed software plus your sites' uptime and TLS. It raises findings with real evidence and sends short, plain-language alerts to Telegram, with exactly where to click to fix each one.
 
-## ทำอะไรได้
+It runs on the PC itself (Node 22, SQLite, no Docker, no cloud backend) and listens on `127.0.0.1` only. You can reach it from your phone over Tailscale.
 
-| ด้าน | รายละเอียด |
+> The UI and Telegram messages are in **Thai**, with English underneath. Code, comments and tests are in English.
+
+## What it watches
+
+| Area | Details |
 |---|---|
-| Infrastructure | CPU, RAM, ดิสก์ทุกไดรฟ์, network, แบตเตอรี่ (โน๊ตบุ๊ค) ของ PC ทุก 1 นาที |
-| Applications | HTTP status, latency, keyword, TLS หมดอายุ, security headers (SSRF-guarded) |
-| Security | อ่าน Windows Event Log: login สำเร็จ/ล้มเหลว, สร้างบัญชี, เพิ่มเข้า Administrators, ล้าง log, ติดตั้ง service, Defender เจอมัลแวร์/ถูกปิด, RDP |
-| Device health | ทุก 30 นาที: Defender เปิด/อัปเดต/**ข้อยกเว้นอันตราย**, ไฟร์วอลล์, Windows Update, BitLocker, สุขภาพ SSD, แบตเสื่อม, **โปรแกรมเริ่มอัตโนมัติ + Scheduled Task ใหม่** (ตรวจลายเซ็น, จับชื่อปลอมเช่น svchost.exe นอก Windows) และอุปกรณ์ใน Tailscale — อ่านอย่างเดียว |
-| Detection | 19 กฎ (เช่น เดารหัสผ่านทั้งแบบเร็วและแบบช้า 24 ชม., มีคนเดารหัสเข้า SENTINEL เอง/รหัสผ่านถูกแต่รหัส 6 หลักผิด/เข้าจากอุปกรณ์ใหม่, login สำเร็จหลังล้มเหลวหลายครั้ง, service ใหม่ตรวจลายเซ็นดิจิทัล) ปรับ threshold ได้ ทุก finding มีหลักฐาน log จริง ปิดหลายรายการพร้อมกันได้ |
-| Alerting | กฎ threshold 9 แบบ (รวมแบตใกล้หมด), dedup, เตือนซ้ำตามรอบ, acknowledge, auto-resolve, Telegram + retry + ประวัติการส่ง |
-| Incidents | Open → Acknowledged → Investigating → Resolved → Closed, Reopen, timeline, note, ผูกหลักฐาน, correlation อัตโนมัติ |
-| Reports | Availability, SLO/error budget, MTTA/MTTR, แนวโน้มความปลอดภัย (7/30/90 วัน) |
-| Admin | รหัสผ่าน Argon2id + MFA (TOTP), จัดการ session, audit log แบบ hash chain, backup อัตโนมัติ + restore |
+| **PC metrics** | CPU, memory, every disk, network and battery, every minute. Overload-aware, so a game or a build doesn't page you. |
+| **Windows Event Log** | Logons (success/fail, RDP), new accounts, admin group changes, cleared logs, new services, Defender detections and Defender being switched off. |
+| **Device health** (every 30 min, read-only) | Defender on and updated, firewall, Windows Update, BitLocker/device encryption, SSD health, battery wear, UAC, remote-control tools, programs listening on every network |
+| **Persistence** | New auto-start entries and scheduled tasks are checked by digital signature. Fakes such as `svchost.exe` outside `C:\Windows` are rated critical. |
+| **Defender exclusions** | Dangerous exclusions (a whole drive, temp folders, system binaries), a classic malware trick |
+| **New programs** | Anything new in the installed-programs list. Unsigned programs, modified signatures (e.g. `HashMismatch`) and crack/repack names are flagged. |
+| **Browser extensions** | Chrome, Brave, Edge, Vivaldi and Opera. Sideloaded or policy-forced extensions, broad permissions, and updates that quietly add permissions. |
+| **Hosts / DNS / proxy** | Hosts lines that fake or block banks, Google, Microsoft, Defender or Telegram. Unknown DNS servers, remote proxies, PAC scripts, WinHTTP proxy, NRPT rules. |
+| **Defender scans** | Start quick/full/offline scans from the phone; the result arrives on Telegram. Optional weekly automatic quick scan. |
+| **Websites / APIs** | HTTP status, latency, keyword, TLS expiry, security headers (SSRF-guarded) |
+| **SENTINEL itself** | Password guessing, correct password with a wrong 2FA code, sign-in from a new device, plus a dead man's switch via healthchecks.io |
 
-## เริ่มใช้งาน
+There are **32 detection rules** with adjustable thresholds. Every finding carries the log lines or values behind it, and most findings close on their own once the problem is fixed.
 
-ต้องมี Node.js 22.13+ บน Windows
+## Alerting and response
+
+- Alert rules with dedup, repeat intervals, acknowledge and auto-resolve. Telegram delivery has retries and a delivery history.
+- Incidents (open → acknowledged → investigating → resolved → closed) with timeline, notes, linked evidence and automatic correlation.
+- A daily digest, plus a weekly summary: scans, new programs, backup test, reminders.
+- From the phone, after a 2FA unlock: lock, sleep, restart or shut down the PC, close a program, open an app.
+
+## Security of SENTINEL itself
+
+- Argon2id password, TOTP 2FA, and fingerprint/passkey unlock (WebAuthn) for the app PIN.
+- Step-up re-authentication for sensitive changes. Short sessions with an idle timeout.
+- Hash-chained audit log. Secrets are encrypted with a local `master.key`.
+- Daily backups, optionally copied to a cloud folder as **passphrase-encrypted** `.sbk` files (AES-256-GCM, scrypt).
+- A **monthly automatic restore test** of the newest cloud copy, and a "test passphrase" button.
+- Safe to test: under `LOCAL_TEST=1` / `POWER_DRY_RUN=1` no power, close-program, launch or scan command really runs.
+
+## Getting started
+
+Requirements: **Windows 10/11** and **Node.js 22.13+**.
 
 ```bash
 npm install
@@ -28,95 +52,88 @@ npm run build
 npm start
 ```
 
-เปิด http://127.0.0.1:3001 บนเครื่องนี้ ครั้งแรกจะให้ตั้งรหัสผ่านแอดมิน (อย่างน้อย 12 ตัว) แล้วแนะนำให้เปิด MFA ที่ **Settings → Account & MFA**
+Open http://127.0.0.1:3001. On first run you create the admin password (at least 12 characters). Then turn on 2FA under **Settings → Account & MFA**.
 
-> **อ่าน Security log ได้ต้องมีสิทธิ์:** รัน SENTINEL ใน terminal แบบ Administrator หรือเพิ่มบัญชีของคุณเข้ากลุ่ม *Event Log Readers* ครั้งเดียว (แนะนำ) แล้ว sign out/in:
-> `net localgroup "Event Log Readers" "%USERNAME%" /add` (รันใน terminal แบบ Administrator)
-> ถ้าไม่มีสิทธิ์ ระบบจะขึ้นแถบเตือนบนหน้าเว็บ ไม่เงียบ
+To read the Security event log, run SENTINEL as Administrator, or add your account to *Event Log Readers* once (then sign out and in):
 
-### รันเบื้องหลังอัตโนมัติ (ไม่ต้อง `npm start` เอง)
+```bash
+net localgroup "Event Log Readers" "%USERNAME%" /add
+```
 
-รันครั้งเดียวใน terminal แบบ **Run as administrator**:
+### Run in the background
+
+Run this once, from an elevated terminal:
 
 ```bash
 npm run service:install
 ```
 
-SENTINEL จะเริ่มเองแบบไม่มีหน้าต่างทุกครั้งที่ sign in เข้า Windows ถ้าโปรแกรมหยุด ตัวรันจะเริ่มใหม่ให้เอง (รอ 20 วินาที–5 นาที) และอ่าน Security log ได้เพราะ task รันด้วยสิทธิ์สูงสุด เปิดหน้าเว็บได้จาก shortcut **SENTINEL** บน Desktop
+This registers a scheduled task that starts SENTINEL hidden at sign-in, restarts it if it stops, and runs it with the rights it needs. Use `service:status`, `service:stop`, `service:start` and `service:uninstall` to manage it. Logs go to `data/logs/sentinel.log`.
 
-| คำสั่ง | ทำอะไร |
-|---|---|
-| `npm run service:status` | ดูว่ารันอยู่ไหม และ log ล่าสุด |
-| `npm run service:stop` / `service:start` | หยุด / เริ่มตอนนี้ |
-| `npm run service:uninstall` | เอาการเริ่มอัตโนมัติออก |
+### Phone access
 
-Log อยู่ที่ `data/logs/sentinel.log` (หมุนไฟล์ที่ 10 MB) หลังแก้โค้ดให้รัน `npm run build` แล้ว `npm run service:stop` และ `npm run service:start`
-
-### เปิดจากมือถือ / นอกบ้าน
-ผ่าน Tailscale (เครือข่ายส่วนตัว ไม่เปิด port ออกอินเทอร์เน็ต) — ดู [`docs/remote-access.md`](docs/remote-access.md)
-
-### แจ้งเตือนเมื่อ SENTINEL เองหยุดทำงาน (dead man's switch)
-SENTINEL บอกไม่ได้ว่าตัวเองตาย (ปิดเครื่อง/แบตหมด/ค้าง) จึงส่งสัญญาณไปบริการภายนอกทุก 5 นาที ถ้าสัญญาณหายไป บริการนั้นจะแจ้งเตือนคุณ
-1. สมัคร https://healthchecks.io (ฟรี) → **Add Check** → Period **5 นาที**, Grace **15 นาที** (หรือ 30 ถ้าไม่อยากโดนเตือนตอนรีสตาร์ท)
-2. **Integrations** → เพิ่ม **Telegram** (กดตามขั้นตอนของเขา) เพื่อให้แจ้งเข้ามือถือ
-3. คัดลอก Ping URL (`https://hc-ping.com/...`) ใส่ใน `.env` เป็น `HEARTBEAT_URL=...` แล้ว `npm run service:stop` / `service:start`
-
-ถ้าส่วนใดของ SENTINEL ผิดปกติ จะส่งไปที่ `<url>/fail` พร้อมชื่อส่วนที่เสีย ให้ healthchecks แจ้งเตือนด้วย URL นี้เป็นความลับ ไม่ถูกเขียนลง log หรือแสดงบนหน้าเว็บ
-> ข้อควรรู้: ปิดโน๊ตบุ๊คเองก็จะถูกแจ้งเตือนเหมือนกัน (เพราะแยกไม่ได้ว่าตั้งใจปิดหรือไม่) — กด **Pause** ใน healthchecks ก่อนปิดเครื่องนานๆ ได้
-
-### สำเนา backup นอกดิสก์
-ตั้ง `BACKUP_COPY_DIR` ใน `.env` เป็นโฟลเดอร์ที่ sync ขึ้น cloud (เช่น `C:\Users\<you>\OneDrive\SENTINEL-backups`) — ทุก backup ถูกคัดลอกไปที่นั่นด้วย (เก็บ 7 ชุดเหมือนกัน) ถ้าคัดลอกไม่ได้ ระบบลองใหม่ทุก 10 นาทีและขึ้นเตือนในหน้าสุขภาพระบบ backup มี `master.key` อยู่ด้วย จึงควรเปิด MFA ของบัญชี cloud นั้น
-
-### AI สรุปเหตุการณ์ (ไม่บังคับ)
-ใส่ `ANTHROPIC_API_KEY=...` ใน `.env` แล้วรีสตาร์ท จะมีปุ่ม **ให้ AI สรุป** ในหน้าเหตุการณ์ Claude อ่านเฉพาะหลักฐานของเหตุการณ์นั้น ตอบเป็นภาษาไทยพร้อมอ้างอิงหลักฐานทุกข้อ (การอ้างอิงที่ไม่มีอยู่จริงจะถูกตัดออก) ผลถูกเก็บในไทม์ไลน์ ไม่มีการเปลี่ยนแปลงอะไรอัตโนมัติ — มีค่าใช้จ่ายต่อครั้งตามการใช้ Claude API และข้อความหลักฐานถูกส่งไปที่ Anthropic
-
-### Telegram
-**Alert Manager → Notifications → Connect Telegram** แล้วทำตามขั้นตอนบนหน้าจอ (token ถูกเข้ารหัสด้วย `data/master.key`) แล้วกด **Send test**
-
-## การตั้งค่า (`.env`, ไม่บังคับ)
-
-| ตัวแปร | ค่าเริ่มต้น | ความหมาย |
-|---|---|---|
-| `PORT` / `HOST` | 3001 / 127.0.0.1 | เข้าได้เฉพาะเครื่องนี้ |
-| `DATA_DIR` | `data` | ที่เก็บฐานข้อมูล, key, backups |
-| `ALLOW_PRIVATE_TARGETS` | false | `true` เพื่อเช็ก localhost/LAN (ปกติบล็อกกัน SSRF) |
-| `COOKIE_SECURE` | false | `true` เมื่อเปิดผ่าน HTTPS |
-
-## ข้อมูล, backup, restore
-
-- ทุกอย่างอยู่ใน `data/` — `sentinel.db` (SQLite) และ `master.key`
-- Backup อัตโนมัติวันละครั้ง (ตั้งเวลาได้) เก็บ 7 ชุดใน `data/backups/` หรือกด **Settings → Backups → Back up now** แล้ว **คัดลอกไปไว้ที่อื่น** (อีกดิสก์/คลาวด์)
-- Restore: หยุด SENTINEL แล้วรัน `npm run restore -- data/backups/<ชื่อ backup>` (ข้อมูลเดิมถูกย้ายไป `data/pre-restore-*` ไม่ถูกลบ)
-- Retention: metrics/check 15 วัน, security log 14 วัน, alert/finding 90 วัน, incident/audit 1 ปี+
-
-## ทดสอบ
+Keep SENTINEL on `127.0.0.1` and publish it only inside your tailnet:
 
 ```bash
-npm test                 # unit (SSRF guard, health, signature, checker, heartbeat)
-npm run test:acceptance  # acceptance + alerting บนเซิร์ฟเวอร์จริง (~3 นาที)
-npm run test:eval        # ความแม่นยำ detection/correlation (21 สถานการณ์)
-npm run typecheck
+tailscale serve --bg --https=8443 http://127.0.0.1:3001
 ```
 
+Don't use `tailscale funnel`, which would put it on the public internet. The web app can be installed on the phone's home screen.
 
-## ข้อจำกัดที่ควรรู้
+### Telegram
 
-- ตรวจจับจาก log/metrics ที่เก็บได้เท่านั้น ไม่ใช่แอนติไวรัส ไม่บล็อกอะไรอัตโนมัติ
-- เว็บบน Vercel ตรวจได้จากภายนอก (HTTP/TLS/headers) เท่านั้น
-- Correlation บอกว่า "เกิดใกล้กันบน asset เดียวกัน" ไม่ได้พิสูจน์สาเหตุ
-- ความพร้อมใช้งานของ PC เครื่องนี้ในรายงานคือ "ช่วงเวลาที่ถูกมอนิเตอร์" (ปิดเครื่อง = ไม่มีข้อมูล ซึ่งเป็นเรื่องปกติ)
-- ใช้คนเดียว — ถ้าต้องการหลายผู้ใช้ ดู ADR-012
+**Alert Manager → Notifications → Connect Telegram**, follow the steps, then press **Send test**. The bot token is encrypted with `data/master.key`.
 
-## โครงสร้าง
+## Configuration (`.env`, all optional)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PORT` / `HOST` | `3001` / `127.0.0.1` | Local only by default |
+| `DATA_DIR` | `data` | Database, key and backups |
+| `ALLOW_PRIVATE_TARGETS` | `false` | `true` to monitor localhost/LAN URLs (blocked by the SSRF guard) |
+| `COOKIE_SECURE` | `false` | `true` when served over HTTPS |
+| `BACKUP_COPY_DIR` | (none) | A cloud-synced folder that receives a copy of every backup |
+| `HEARTBEAT_URL` | (none) | healthchecks.io ping URL (dead man's switch) |
+| `ANTHROPIC_API_KEY` | (none) | Optional AI summary of an incident (Claude). Off unless set. |
+
+See [`.env.example`](.env.example).
+
+## Data, backup and restore
+
+- Everything lives in `data/`: `sentinel.db` (SQLite) and `master.key`. **Never commit this folder.**
+- Backups are taken daily and 7 are kept. Restore with `npm run restore -- <backup file>`; the current data is moved aside, not deleted.
+- Retention: metrics 15 days, security log 14 days, alerts/findings 90 days, incidents/audit 1 year or more.
+
+## Tests
+
+```bash
+npm test                 # unit tests
+npm run test:acceptance  # end-to-end against a real server with a scratch DB (~3 min)
+npm run test:eval        # detection / correlation accuracy on labelled scenarios
+npx tsc -b               # type check
+```
+
+## Project layout
 
 ```text
 server/
-  db.ts                 schema + migration
-  lib/                  ssrf, checker, crypto, totp, audit, health, bus
-  modules/              auth, assets, http-monitor, host-collector, eventlog,
-                        detection, alerts, notify, incidents, reports, backup, system
-web/src/                React + Tailwind + ECharts (10 หน้า)
-scripts/restore.ts      กู้คืน backup
-tests/                  acceptance tests
-docs/                   SRS, ADR, Schema, Test Plan, ผลทดสอบ
+  index.ts              schedulers and HTTP API (Express 5)
+  db.ts                 schema and migrations (node:sqlite)
+  lib/                  pure logic: detection helpers, judges, messages, crypto, SSRF guard …
+  modules/              auth, device health, event log, detection, alerts, incidents, backup …
+scripts/                device-health.ps1 (read-only snapshot), autostart, restore
+web/src/                React 19 + Tailwind v4 + ECharts
+tests/                  acceptance and detection-eval tests
+docs/                   SRS, ADRs, database schema, test plan (Thai)
 ```
+
+## Limits
+
+- It detects from logs and settings it can read. It is **not an antivirus** and blocks nothing automatically.
+- Websites hosted elsewhere are checked from the outside only (HTTP, TLS, headers).
+- Correlation means "happened close together on the same asset", not proven cause.
+- It has a single admin by design (see ADR-012).
+
+## License
+
+[MIT](LICENSE)
