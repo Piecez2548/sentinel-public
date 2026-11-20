@@ -1,0 +1,158 @@
+<!--
+  SENTINEL Sysmon config: low noise, for one personal Windows PC.
+  Records only what SENTINEL's detection rules look at (rules: server/lib/sysmon-rules.ts):
+  suspicious process starts, network use by script hosts / programs in Temp, LSASS memory access,
+  UAC / Winlogon / IFEO registry changes, files dropped in the Startup folder, process tampering.
+  Install / update:  Sysmon64.exe -accepteula -i sysmon-config.xml   (update: Sysmon64.exe -c sysmon-config.xml)
+  Inside a RuleGroup with groupRelation="or", any one matching condition records the event.
+-->
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>sha256</HashAlgorithms>
+  <CheckRevocation>False</CheckRevocation>
+  <EventFiltering>
+
+    <!-- 1: process creation -->
+    <RuleGroup name="process" groupRelation="or">
+      <ProcessCreate onmatch="include">
+        <!-- Programs started from places malware drops files -->
+        <Image condition="contains">\AppData\Local\Temp\</Image>
+        <Image condition="contains">\Windows\Temp\</Image>
+        <Image condition="contains">\Users\Public\</Image>
+        <Image condition="contains">\Downloads\</Image>
+        <Image condition="contains">\$Recycle.Bin\</Image>
+        <Image condition="begin with">C:\ProgramData\</Image>
+        <!-- Documents, PDFs and script hosts starting other programs -->
+        <ParentImage condition="end with">\winword.exe</ParentImage>
+        <ParentImage condition="end with">\excel.exe</ParentImage>
+        <ParentImage condition="end with">\powerpnt.exe</ParentImage>
+        <ParentImage condition="end with">\outlook.exe</ParentImage>
+        <ParentImage condition="end with">\acrord32.exe</ParentImage>
+        <ParentImage condition="end with">\acrobat.exe</ParentImage>
+        <ParentImage condition="end with">\wscript.exe</ParentImage>
+        <ParentImage condition="end with">\cscript.exe</ParentImage>
+        <ParentImage condition="end with">\mshta.exe</ParentImage>
+        <!-- Script hosts and tools malware borrows -->
+        <Image condition="end with">\mshta.exe</Image>
+        <Image condition="end with">\wscript.exe</Image>
+        <Image condition="end with">\cscript.exe</Image>
+        <Image condition="end with">\regsvr32.exe</Image>
+        <Image condition="end with">\certutil.exe</Image>
+        <Image condition="end with">\bitsadmin.exe</Image>
+        <Image condition="end with">\vssadmin.exe</Image>
+        <Image condition="end with">\wbadmin.exe</Image>
+        <Image condition="end with">\bcdedit.exe</Image>
+        <Image condition="end with">\wevtutil.exe</Image>
+        <Image condition="end with">\netsh.exe</Image>
+        <Image condition="end with">\schtasks.exe</Image>
+        <Image condition="end with">\reg.exe</Image>
+        <Image condition="end with">\net.exe</Image>
+        <Image condition="end with">\net1.exe</Image>
+        <!-- PowerShell doing things scripts rarely need -->
+        <CommandLine condition="contains any">-enc ;-encodedcommand;-ec ;FromBase64String;DownloadString;DownloadFile;Net.WebClient;Invoke-Expression;IEX(;IEX (;-w hidden;-windowstyle hidden;Start-BitsTransfer;Add-MpPreference;Set-MpPreference;Invoke-WebRequest;iwr ;Invoke-RestMethod</CommandLine>
+      </ProcessCreate>
+    </RuleGroup>
+    <RuleGroup name="process-noise" groupRelation="or">
+      <ProcessCreate onmatch="exclude">
+        <!-- SENTINEL's own reads of the event log (every 30 s) -->
+        <CommandLine condition="begin with">wevtutil qe </CommandLine>
+        <CommandLine condition="begin with">"wevtutil" qe </CommandLine>
+        <!-- Windows Update / Defender housekeeping -->
+        <Image condition="begin with">C:\ProgramData\Microsoft\Windows Defender\</Image>
+        <Image condition="begin with">C:\ProgramData\Package Cache\</Image>
+      </ProcessCreate>
+    </RuleGroup>
+
+    <!-- 3: network connections by script hosts, borrowed tools and programs in Temp -->
+    <RuleGroup name="network" groupRelation="or">
+      <NetworkConnect onmatch="include">
+        <Image condition="end with">\mshta.exe</Image>
+        <Image condition="end with">\wscript.exe</Image>
+        <Image condition="end with">\cscript.exe</Image>
+        <Image condition="end with">\regsvr32.exe</Image>
+        <Image condition="end with">\rundll32.exe</Image>
+        <Image condition="end with">\certutil.exe</Image>
+        <Image condition="end with">\bitsadmin.exe</Image>
+        <Image condition="end with">\msbuild.exe</Image>
+        <Image condition="end with">\installutil.exe</Image>
+        <Image condition="contains">\AppData\Local\Temp\</Image>
+        <Image condition="contains">\Windows\Temp\</Image>
+        <Image condition="contains">\Users\Public\</Image>
+        <Image condition="contains">\$Recycle.Bin\</Image>
+      </NetworkConnect>
+    </RuleGroup>
+
+    <!-- 8: a program starting a thread inside another one (code injection) -->
+    <RuleGroup name="injection" groupRelation="or">
+      <CreateRemoteThread onmatch="include">
+        <TargetImage condition="end with">\lsass.exe</TargetImage>
+        <TargetImage condition="end with">\explorer.exe</TargetImage>
+        <TargetImage condition="end with">\svchost.exe</TargetImage>
+        <TargetImage condition="end with">\winlogon.exe</TargetImage>
+      </CreateRemoteThread>
+    </RuleGroup>
+
+    <!-- 10: reading LSASS memory (where Windows keeps sign-in secrets) -->
+    <RuleGroup name="lsass" groupRelation="and">
+      <ProcessAccess onmatch="include">
+        <TargetImage condition="end with">\lsass.exe</TargetImage>
+        <GrantedAccess condition="contains any">0x1010;0x1410;0x1438;0x143a;0x1418;0x1fffff;0x1f0fff;0x1f1fff;0x1f2fff;0x1f3fff</GrantedAccess>
+      </ProcessAccess>
+    </RuleGroup>
+    <RuleGroup name="lsass-noise" groupRelation="or">
+      <ProcessAccess onmatch="exclude">
+        <SourceImage condition="is">C:\Windows\system32\wininit.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\system32\csrss.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\system32\lsm.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\system32\wbem\wmiprvse.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\system32\MRT.exe</SourceImage>
+        <SourceImage condition="begin with">C:\ProgramData\Microsoft\Windows Defender\Platform\</SourceImage>
+        <SourceImage condition="begin with">C:\Program Files\Windows Defender\</SourceImage>
+      </ProcessAccess>
+    </RuleGroup>
+
+    <!-- 11: files dropped where they start with Windows -->
+    <RuleGroup name="files" groupRelation="or">
+      <FileCreate onmatch="include">
+        <TargetFilename condition="contains">\Start Menu\Programs\Startup\</TargetFilename>
+      </FileCreate>
+    </RuleGroup>
+
+    <!-- 12/13: registry keys that turn off UAC or hijack sign-in / program start -->
+    <RuleGroup name="registry" groupRelation="or">
+      <RegistryEvent onmatch="include">
+        <TargetObject condition="end with">\Policies\System\EnableLUA</TargetObject>
+        <TargetObject condition="end with">\Policies\System\ConsentPromptBehaviorAdmin</TargetObject>
+        <TargetObject condition="end with">\Policies\System\PromptOnSecureDesktop</TargetObject>
+        <TargetObject condition="end with">\Winlogon\Shell</TargetObject>
+        <TargetObject condition="end with">\Winlogon\Userinit</TargetObject>
+        <TargetObject condition="contains">\Image File Execution Options\</TargetObject>
+        <TargetObject condition="contains">\Windows Defender\Exclusions\</TargetObject>
+        <TargetObject condition="contains">\Policies\Microsoft\Windows Defender\</TargetObject>
+      </RegistryEvent>
+    </RuleGroup>
+
+    <!-- 25: a running program's code was swapped (process hollowing) -->
+    <RuleGroup name="tamper" groupRelation="or">
+      <ProcessTampering onmatch="exclude" />
+    </RuleGroup>
+
+    <!-- Off: image loads, raw disk access, pipes, WMI, DNS, clipboard, file deletes -->
+    <RuleGroup name="off" groupRelation="or">
+      <ImageLoad onmatch="include" />
+      <RawAccessRead onmatch="include" />
+      <PipeEvent onmatch="include" />
+      <WmiEvent onmatch="include" />
+      <DnsQuery onmatch="include" />
+      <ClipboardChange onmatch="include" />
+      <FileDelete onmatch="include" />
+      <FileDeleteDetected onmatch="include" />
+      <FileCreateTime onmatch="include" />
+      <FileCreateStreamHash onmatch="include" />
+      <DriverLoad onmatch="include" />
+      <ProcessTerminate onmatch="include" />
+      <FileBlockExecutable onmatch="include" />
+      <FileBlockShredding onmatch="include" />
+      <FileExecutableDetected onmatch="include" />
+    </RuleGroup>
+  </EventFiltering>
+</Sysmon>

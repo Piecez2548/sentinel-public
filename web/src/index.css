@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b0a10;
+  --color-panel: #15141c;
+  --color-panel-2: #1c1b26;
+  --color-line: #2a2937;
+  --color-accent: #8b5cf6;
+  --color-accent-2: #38bdf8;
+  --color-ok: #22c55e;
+  --color-warn: #eab308;
+  --color-bad: #ef4444;
+  --color-muted: #8c8ba0;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: radial-gradient(1200px 600px at 50% 110%, #2a1a5e55, transparent), var(--color-bg);
+  color: #e7e6f0;
+  font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", "Leelawadee UI", "Noto Sans Thai", Tahoma, sans-serif;
+}
+/* Thai script needs a little more line height to avoid clipped vowels and tone marks. */
+html:lang(th) body { line-height: 1.6; }
+
+/* Grid columns may shrink below their content. Without this, one long truncated name or URL
+   widens its column past the phone screen and the whole page scrolls sideways. */
+.grid > * { min-width: 0; }
+
+/* Wrong app PIN: the dots shake. */
+@keyframes pin-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+
+/* ---------- polish ---------- */
+/* Native controls (scrollbars, checkboxes, selects, date pickers) follow the dark theme. */
+:root { color-scheme: dark; accent-color: var(--color-accent); }
+::selection { background: color-mix(in srgb, var(--color-accent) 45%, transparent); color: #fff; }
+
+* { scrollbar-width: thin; scrollbar-color: #3a3950 transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: #3a3950; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background-color: #4c4a68; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* Visible keyboard focus everywhere, invisible for mouse clicks. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 80%, white);
+  outline-offset: 2px;
+}
+
+/* Numbers in KPIs and tables do not jump around while live data updates. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+@keyframes page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.page-in { animation: page-in .25s ease-out both; }
+.pop-in { animation: pop-in .18s ease-out both; }
+.fade-in { animation: fade-in .15s ease-out both; }
+.skeleton {
+  background: linear-gradient(90deg, var(--color-panel) 0px, var(--color-panel-2) 160px, var(--color-panel) 320px);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-in, .pop-in, .fade-in, .skeleton { animation: none; }
+}

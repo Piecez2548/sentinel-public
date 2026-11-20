@@ -1,0 +1,54 @@
+{
+  "name": "sentinel",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Single-admin security monitoring & observability for your PC and websites",
+  "scripts": {
+    "dev": "concurrently -n server,web -c magenta,cyan \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "tsx watch --env-file-if-exists=.env server/index.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "tsx --env-file-if-exists=.env server/index.ts",
+    "restore": "tsx scripts/restore.ts",
+    "service:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/autostart.ps1 install",
+    "service:uninstall": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/autostart.ps1 uninstall",
+    "service:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/autostart.ps1 start",
+    "service:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/autostart.ps1 stop",
+    "service:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/autostart.ps1 status",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test server/lib/*.test.ts",
+    "test:eval": "tsx --test tests/detection-eval.test.ts",
+    "test:acceptance": "tsx --test --test-concurrency=1 tests/acceptance.test.ts tests/alerting.test.ts"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "@node-rs/argon2": "^2.2.2",
+    "@simplewebauthn/browser": "14.0.0",
+    "@simplewebauthn/server": "14.0.3",
+    "echarts": "^6.1.0",
+    "express": "^5.3.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "undici": "^8.12.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "concurrently": "^10.0.7",
+    "tailwindcss": "^4.3.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
