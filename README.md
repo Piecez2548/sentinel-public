@@ -1,5 +1,7 @@
 # SENTINEL
 
+[![CI](https://github.com/Piecez2548/sentinel-public/actions/workflows/ci.yml/badge.svg)](https://github.com/Piecez2548/sentinel-public/actions/workflows/ci.yml)
+
 **English** · [ภาษาไทย](README.th.md)
 
 A self-hosted **security monitor for one Windows PC and your websites**, built for a single admin. It watches the PC's protection, logs and installed software plus your sites' uptime and TLS. It raises findings with real evidence and sends short, plain-language alerts to Telegram, with exactly where to click to fix each one.

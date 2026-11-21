@@ -1,5 +1,7 @@
 # SENTINEL
 
+[![CI](https://github.com/Piecez2548/sentinel-public/actions/workflows/ci.yml/badge.svg)](https://github.com/Piecez2548/sentinel-public/actions/workflows/ci.yml)
+
 [English](README.md) · **ภาษาไทย**
 
 แพลตฟอร์ม **Security Monitoring + Observability** สำหรับแอดมินคนเดียว ตาม SENTINEL Blueprint v1.0 (ทาง B: ฟีเจอร์ครบ ใช้ชิ้นส่วนน้อย) — ดูเอกสารใน [`docs/`](docs)
