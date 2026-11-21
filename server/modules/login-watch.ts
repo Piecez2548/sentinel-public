@@ -95,7 +95,9 @@ export function onLoginFailed(ip: string, reason: string, locked: boolean, userA
 
 /** "Mozilla/5.0 (Linux; Android 14…) … Chrome/…" → "Chrome on Android" */
 export function deviceLabel(ua: string): string {
-  const os = /Android/i.test(ua) ? 'Android' : /iPhone|iPad/i.test(ua) ? 'iPhone/iPad' : /Windows/i.test(ua) ? 'Windows' : /Mac OS X|Macintosh/i.test(ua) ? 'Mac' : /Linux/i.test(ua) ? 'Linux' : 'unknown OS';
+  // iPadOS Safari presents itself as a Mac ("Macintosh … Safari", no Chrome/Firefox token), so it cannot be told apart.
+  const macSafari = /Macintosh/i.test(ua) && /Safari\//.test(ua) && !/Chrome\/|CriOS|Firefox\/|FxiOS|Edg\//.test(ua);
+  const os = /Android/i.test(ua) ? 'Android' : /iPhone|iPad/i.test(ua) ? 'iPhone/iPad' : /Windows/i.test(ua) ? 'Windows' : macSafari ? 'Mac or iPad' : /Mac OS X|Macintosh/i.test(ua) ? 'Mac' : /Linux/i.test(ua) ? 'Linux' : 'unknown OS';
   const br = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : ua ? 'browser' : 'unknown browser';
   return `${br} on ${os}`;
 }

@@ -72,6 +72,17 @@ const FIX: Record<string, string> = {
   open_ports: 'Not used? Stop or uninstall that program. Yours? Security Center → open the finding → Resolve, and it will not alert again.',
 };
 
+const IOS_TIPS = [
+  'Updates on: Settings → General → Software Update → Automatic Updates (including Security Responses).',
+  'Use a 6-digit or longer passcode with Face ID / Touch ID: Settings → Face ID & Passcode.',
+  'iPhone: turn on Stolen Device Protection in Settings → Face ID & Passcode.',
+  'Remove profiles you did not install (they can add a root certificate or a proxy): Settings → General → VPN & Device Management.',
+  'Apple Account: Settings → your name → Sign-In & Security → two-factor on; remove devices you do not know.',
+  'Run Safety Check: Settings → Privacy & Security → Safety Check → review who and which apps have access.',
+  'Find My on: Settings → your name → Find My → Find My iPhone / iPad.',
+  'To open SENTINEL: install Tailscale from the App Store, sign in with the same account, then Safari → Share → Add to Home Screen.',
+];
+
 const ANDROID_TIPS = [
   'Play Protect on: Play Store → profile → Play Protect → Scan.',
   'Install system updates: Settings → System → Software update (and Google Play system update).',
@@ -539,6 +550,15 @@ export default function DevicePage({ go }: { go: (p: string) => void }) {
               <p className="mb-2 text-xs text-muted">{t('Android does not let other apps inspect the phone, so SENTINEL cannot scan it. These built-in protections are what actually works:')}</p>
               <ol className="list-decimal space-y-1.5 pl-5 text-sm">
                 {ANDROID_TIPS.map((x) => (
+                  <li key={x}>{t(x)}</li>
+                ))}
+              </ol>
+            </Card>
+
+            <Card title={t('iPhone / iPad checklist')}>
+              <p className="mb-2 text-xs text-muted">{t('Apple does not let other apps inspect an iPhone or iPad either. These built-in protections are what actually works:')}</p>
+              <ol className="list-decimal space-y-1.5 pl-5 text-sm">
+                {IOS_TIPS.map((x) => (
                   <li key={x}>{t(x)}</li>
                 ))}
               </ol>

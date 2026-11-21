@@ -69,3 +69,27 @@ html:lang(th) body { line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) {
   .page-in, .pop-in, .fade-in, .skeleton { animation: none; }
 }
+
+/* Phones and tablets: small controls get a finger-sized hit area (about 36 px) without changing the desktop layout. */
+@media (pointer: coarse) {
+  main select,
+  main input:not([type='checkbox']):not([type='radio']):not([type='range']) {
+    min-height: 2.25rem;
+  }
+  main input[type='checkbox'],
+  main input[type='radio'] {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  /* Segmented pickers (1 h / 6 h / 24 h …) and other small text buttons. */
+  main button.text-xs:not([role='switch']) {
+    min-height: 2rem;
+  }
+  /* "See all →" style links next to card titles. */
+  /* Only plain inline links: ones with their own layout (block rows, flex, truncated) keep it. */
+  main a.text-xs:not(.block):not(.flex):not(.inline-flex):not(.grid):not(.truncate) {
+    display: inline-block;
+    max-width: 100%;
+    padding-block: 0.4rem;
+  }
+}
