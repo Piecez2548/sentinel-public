@@ -18,6 +18,7 @@ type Latest = {
   programs?: { count: number; baselineAt: number | null; added: number } | null;
   extensions?: { count: number; baselineAt: number | null; added: number; list: InstalledExt[] } | null;
   system?: SysSummary | null;
+  peripherals?: PeriphSummary | null;
   network?: { baselineAt: number | null; added: number; hosts: { name: string; ip: string }[]; dns: { name: string; servers: string[] }[]; proxies: { name: string; value: string }[]; rules: { name: string; value: string }[] } | null;
 };
 type NetEvent = { kind: 'added' | 'removed'; what: string; name: string; value: string; at: number; severity?: string };
@@ -29,6 +30,8 @@ type SysSummary = {
   settings: { id: string; name: string }[];
   readable: { cert: boolean; firewall: boolean; setting: boolean };
 };
+type PeriphSummary = { baselineAt: number | null; added: number; usbDrives: number; disks: number; keyboards: number; wifi: { saved: number; openAuto: string[]; now: string | null; nowOpen: boolean } };
+type PeriphEvent = { kind: 'added' | 'removed'; section: 'disk' | 'keyboard' | 'wifi' | 'wifinow'; name: string; value: string; at: number; severity?: string };
 type SysEvent = { kind: 'added' | 'removed'; section: 'cert' | 'firewall' | 'setting'; name: string; value: string; at: number; severity?: string };
 type InstalledExt = { browser: string; profile: string; id: string; name: string; version?: string; severity: string; reason: string; powers: string[] };
 type ExtEvent = { kind: 'added' | 'removed' | 'gained'; name: string; browser: string; at: number; severity?: string; reason?: string; powers?: string[] };
@@ -41,6 +44,7 @@ type Resp = {
   recentExtensions?: ExtEvent[];
   recentNetwork?: NetEvent[];
   recentSystem?: SysEvent[];
+  recentPeripherals?: PeriphEvent[];
   everyMs: number;
   running: boolean;
 };
@@ -191,6 +195,55 @@ function NetworkCard({ l, events, findings, go }: { l: Latest; events: NetEvent[
                 <span className="min-w-0 flex-1 break-words">
                   {t(NET_WHAT[e.what] ?? e.what)}: {e.what === 'hosts' ? `${e.name} → ${e.value}` : e.value}
                   <span className="block text-xs text-muted">{e.kind === 'removed' ? t('Removed') : e.name}</span>
+                </span>
+                <span className="whitespace-nowrap text-xs text-muted">{ago(e.at)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Card>
+  );
+}
+
+const PER_WHAT: Record<PeriphEvent['section'], string> = { disk: 'Drive', keyboard: 'Keyboard device', wifi: 'Saved Wi-Fi', wifinow: 'Open Wi-Fi' };
+
+/** USB drives ever plugged in, keyboard devices and Wi-Fi networks. */
+function PeripheralsCard({ l, events, findings, go }: { l: Latest; events: PeriphEvent[]; findings: Resp['findings']; go: (p: string) => void }) {
+  const p = l.peripherals;
+  const row = (label: string, value: string, warn = false) => (
+    <li className="flex items-start justify-between gap-3 py-1.5">
+      <span className="text-muted">{label}</span>
+      <span className={`min-w-0 break-words text-right ${warn ? 'text-warn' : ''}`}>{value}</span>
+    </li>
+  );
+  return (
+    <Card title={`🔌 ${t('USB drives, keyboards and Wi-Fi')}`}>
+      <p className="mb-3 text-xs text-muted">
+        {p ? t('Watched every 30 minutes. A new USB drive or being on a Wi-Fi without a password → medium; a "keyboard" made from a developer board or arriving with a new drive (BadUSB) → high.') : t('Not read yet.')}
+        {p?.baselineAt && ` ${t('Baseline taken {when}.', { when: ago(p.baselineAt) })}`}
+      </p>
+      <FindingList findings={findings} go={go} />
+      {p && (
+        <ul className="mb-3 divide-y divide-line text-sm">
+          {row(t('USB drives ever plugged in'), String(p.usbDrives))}
+          {row(t('Disks'), String(p.disks))}
+          {row(t('Keyboard devices'), String(p.keyboards))}
+          {row(t('Wi-Fi now'), p.wifi.now ? `${p.wifi.now}${p.wifi.nowOpen ? ` · ${t('no password')}` : ''}` : p.wifi.now === '' ? t('Not on Wi-Fi') : t('Could not read'), p.wifi.nowOpen)}
+          {row(t('Saved Wi-Fi networks'), String(p.wifi.saved))}
+          {p.wifi.openAuto.length > 0 && row(t('No password, joins by itself'), p.wifi.openAuto.join(', '), true)}
+        </ul>
+      )}
+      {events.length > 0 && (
+        <>
+          <p className="mb-1 text-xs font-medium text-muted">{t('Last 30 days')}</p>
+          <ul className="divide-y divide-line text-sm">
+            {events.map((e, i) => (
+              <li key={i} className="flex items-start gap-2 py-2">
+                <span>{e.kind === 'removed' ? '🗑️' : e.severity === 'high' ? '🟠' : e.severity === 'medium' ? '🟡' : '🆕'}</span>
+                <span className="min-w-0 flex-1 break-words">
+                  {t(PER_WHAT[e.section] ?? e.section)}: {e.name}
+                  <span className="block text-xs text-muted">{e.kind === 'removed' ? t('Removed') : e.section === 'disk' ? t(e.value === 'USB drive' ? 'USB drive' : 'Disk') : e.value}</span>
                 </span>
                 <span className="whitespace-nowrap text-xs text-muted">{ago(e.at)}</span>
               </li>
@@ -361,9 +414,10 @@ export default function DevicePage({ go }: { go: (p: string) => void }) {
   const ok = checks.filter((c) => c.status === 'ok').length;
   const known = checks.filter((c) => c.status !== 'unknown').length;
   const worst = checks[0]?.status ?? 'unknown';
-  const autostart = (data?.findings ?? []).filter((f) => !['program_installed', 'browser_extension', 'network_changed', 'system_changed'].includes(f.ruleId));
+  const autostart = (data?.findings ?? []).filter((f) => !['program_installed', 'browser_extension', 'network_changed', 'system_changed', 'device_connected'].includes(f.ruleId));
   const netFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'network_changed');
   const sysFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'system_changed');
+  const perFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'device_connected');
   const extFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'browser_extension');
   const programFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'program_installed');
 
@@ -454,6 +508,7 @@ export default function DevicePage({ go }: { go: (p: string) => void }) {
             <ExtensionsCard l={l} events={data.recentExtensions ?? []} findings={extFindings} go={go} />
             <NetworkCard l={l} events={data.recentNetwork ?? []} findings={netFindings} go={go} />
             <SystemCard l={l} events={data.recentSystem ?? []} findings={sysFindings} go={go} />
+            <PeripheralsCard l={l} events={data.recentPeripherals ?? []} findings={perFindings} go={go} />
           </div>
 
           <div className="space-y-4">

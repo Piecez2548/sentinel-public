@@ -209,6 +209,35 @@ $system = Try-Get {
   [ordered]@{ certs = $certs; certsOk = $certsOk; firewall = $fw; firewallOk = $fwOk; settings = $settings; settingsOk = $setOk }
 }
 
+# Disks (incl. USB drives ever plugged in), keyboard devices, saved Wi-Fi networks and the current one (read-only).
+# Only names and security types are sent; Wi-Fi keys in the profile files are never read out.
+$peripherals = Try-Get {
+  $disksOk = $true; $kbdOk = $true; $wifiOk = $true
+  $disks = @(try { Get-PnpDevice -Class DiskDrive -ErrorAction Stop | ForEach-Object { [ordered]@{ id = [string]$_.InstanceId; name = [string]$_.FriendlyName; present = [bool]$_.Present } } } catch { $disksOk = $false })
+  $keyboards = @(try { Get-PnpDevice -Class Keyboard -ErrorAction Stop | ForEach-Object { [ordered]@{ id = [string]$_.InstanceId; name = [string]$_.FriendlyName; present = [bool]$_.Present } } } catch { $kbdOk = $false })
+  $wifi = @(try {
+    $dir = Join-Path $env:ProgramData 'Microsoft\Wlansvc\Profiles\Interfaces'
+    if (Test-Path -LiteralPath $dir) {
+      Get-ChildItem -LiteralPath $dir -Recurse -Filter *.xml -ErrorAction Stop | ForEach-Object {
+        try {
+          [xml]$x = Get-Content -LiteralPath $_.FullName -Raw -ErrorAction Stop
+          $p = $x.WLANProfile
+          $ssid = [string]$p.SSIDConfig.SSID.name
+          if (-not $ssid) { $ssid = [string]$p.name }
+          [ordered]@{ ssid = $ssid; auth = [string]$p.MSM.security.authEncryption.authentication; enc = [string]$p.MSM.security.authEncryption.encryption; mode = [string]$p.connectionMode }
+        } catch { }
+      }
+    }
+  } catch { $wifiOk = $false })
+  # The "SSID" label is not translated in netsh output, unlike the other labels.
+  $now = try {
+    $lines = @(netsh wlan show interfaces 2>$null)
+    $ssidLine = $lines | Where-Object { $_ -match '^\s*SSID\s*:' } | Select-Object -First 1
+    if ($ssidLine) { ($ssidLine -replace '^\s*SSID\s*:\s*', '').Trim() } else { '' }
+  } catch { $null }
+  [ordered]@{ disks = $disks; disksOk = $disksOk; keyboards = $keyboards; keyboardsOk = $kbdOk; wifi = $wifi; wifiOk = $wifiOk; wifiNow = $now }
+}
+
 [ordered]@{
   isAdmin = $isAdmin
   defender = $defender
@@ -225,4 +254,5 @@ $system = Try-Get {
   listeners = $listeners
   network = $network
   system = $system
+  peripherals = $peripherals
 } | ConvertTo-Json -Depth 5 -Compress

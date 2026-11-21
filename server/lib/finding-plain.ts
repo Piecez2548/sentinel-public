@@ -45,6 +45,16 @@ export function plainFinding(f: Input): PlainText | null {
       if (f.severity === 'high') return { title: `${what}ใหม่ ไม่รู้ว่าใครสร้าง: ${name}`, summary: 'ไม่มีลายเซ็นยืนยัน หรือชี้ไปที่ไฟล์ที่ไม่มีอยู่แล้ว', fix: `ถ้าไม่ได้ติดตั้งเอง: ${fix}` };
       return { title: `${what}ใหม่: ${name}`, summary: 'ตรวจไม่ได้ว่าใครสร้าง', fix: `ถ้าไม่รู้จัก: ${fix}` };
     }
+    case 'device_connected': {
+      const th = str(d.headlineTh);
+      const section = str(d.section);
+      const fix =
+        section === 'disk' ? 'ถ้าไม่ใช่ของคุณ: ถอดออก แล้วสแกน Quick scan'
+        : section === 'keyboard' ? (f.severity === 'high' ? 'ถอดอุปกรณ์ออกทันที ล็อกเครื่อง แล้วสแกน Full scan' : 'ถ้าไม่ได้เสียบเอง: ถอดอุปกรณ์ที่ไม่รู้จักออก')
+        : section === 'wifinow' ? 'เปลี่ยนไปใช้ Wi-Fi ที่มีรหัส หรือแชร์เน็ตจากมือถือ'
+        : 'Settings → Network & internet → Wi-Fi → Manage known networks → เลือกชื่อนั้น → Forget';
+      return { title: th || f.title, summary: f.severity === 'low' ? 'ดูไม่อันตราย ถ้าเป็นของคุณก็ไม่ต้องทำอะไร' : str(d.assessment) || f.summary, fix };
+    }
     case 'system_changed': {
       const th = str(d.headlineTh);
       const section = str(d.section);

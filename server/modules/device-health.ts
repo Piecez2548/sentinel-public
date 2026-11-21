@@ -20,6 +20,7 @@ import { appKey, iconExe, judgeApp, newApps, pickExes, programMessage, removedKe
 import { diffExtensions, extensionMessage, judgeExt, trimExtEvents, type ExtBaseline, type ExtEvent, type ExtProfile, type ExtVerdict } from '../lib/browser-ext.js';
 import { readBrowserExtensions } from '../lib/browser-ext-read.js';
 import { diffNet, keyParts, netMessage, trimNetEvents, type NetBaseline, type NetEvent, type NetSnap } from '../lib/net-watch.js';
+import { diffPeriph, judgePeriph, periphMessage, periphSectionOf, trimPeriphEvents, wifiRisk, type PeriphBaseline, type PeriphEvent, type PeriphSnap } from '../lib/periph-watch.js';
 import { diffSys, expandApp, judgeSys, sectionOf, settingName, sysMessage, trimSysEvents, type Sig, type SysBaseline, type SysEvent, type SysItem, type SysSnap } from '../lib/sys-watch.js';
 import { upsertFinding } from './detection.js';
 import { getLocalAssetId } from './host-collector.js';
@@ -57,6 +58,8 @@ export type Snapshot = {
   network?: NetSnap | null;
   /* Added 2026-11-21: trusted root certificates, inbound firewall allow rules, security settings. */
   system?: SysSnap | null;
+  /* Added 2026-11-21: disks / USB drives, keyboard devices, saved and current Wi-Fi. */
+  peripherals?: PeriphSnap | null;
   /** Tests only: browser profiles (the live server reads them itself). */
   extensions?: ExtProfile[] | null;
 };
@@ -585,6 +588,78 @@ async function watchSystem(assetId: number, n: SysSnap | null | undefined, now: 
   };
 }
 
+/* ---------- USB drives, keyboards, Wi-Fi ---------- */
+
+const PER_BASELINE = 'device_peripherals_baseline';
+const PER_EVENTS = 'device_peripherals_events';
+const perFp = (assetId: number, key: string) => `device_connected:${assetId}:${createHash('sha1').update(key).digest('hex').slice(0, 16)}`;
+
+export type PeriphSummary = {
+  baselineAt: number | null;
+  added: number;
+  usbDrives: number;
+  disks: number;
+  keyboards: number;
+  wifi: { saved: number; openAuto: string[]; now: string | null; nowOpen: boolean };
+};
+
+export function peripheralEvents(): PeriphEvent[] {
+  return parseJson<PeriphEvent[]>(getSetting(PER_EVENTS) ?? '[]', []);
+}
+
+function watchPeripherals(assetId: number, n: PeriphSnap | null | undefined, now: number): PeriphSummary | null {
+  if (!n) return null;
+  const raw = getSetting(PER_BASELINE);
+  const base = raw ? parseJson<PeriphBaseline | null>(raw, null) : null;
+  const { changes, next, items } = diffPeriph(n, base);
+  const newDrive = changes.some((c) => c.kind === 'added' && c.item.section === 'disk' && c.item.usb);
+  const events = peripheralEvents();
+  let added = 0;
+  for (const c of changes) {
+    if (c.kind === 'removed') {
+      const section = periphSectionOf(c.key);
+      // Leaving an open Wi-Fi is not worth a history line; resolving its finding is enough.
+      if (section !== 'wifinow') events.push({ kind: 'removed', section, name: c.name, value: '', at: now });
+      run("UPDATE security_findings SET status = 'resolved', resolved_at = ?, note = 'Gone — auto-resolved' WHERE fingerprint = ? AND status IN ('open','acknowledged')", now, perFp(assetId, c.key));
+      continue;
+    }
+    const it = c.item;
+    const v = judgePeriph(it, { newDrive });
+    events.push({ kind: 'added', section: it.section, name: it.name, value: it.value, at: now, severity: v.severity, reason: v.reason });
+    if (++added > MAX_FINDINGS_PER_RUN) continue;
+    const msg = periphMessage(it, v, assetLabel(assetId));
+    upsertFinding({
+      notify: { en: msg.en, th: msg.th },
+      ruleId: 'device_connected',
+      assetId,
+      severity: v.severity,
+      title: msg.headlineEn,
+      summary: v.detail,
+      fingerprint: perFp(assetId, it.key),
+      condition: 'New since the last device check · USB drives / keyboard devices / Wi-Fi',
+      extra: { details: { section: it.section, name: it.name, value: it.value, vid: it.vid, usb: it.usb, auth: it.auth, autoConnect: it.auto, reason: v.reason, assessment: v.detail, headlineTh: msg.headlineTh, headlineEn: msg.headlineEn } },
+      mergeWindowMs: 365 * DAY,
+    });
+  }
+  if (!base) setSetting('device_peripherals_baseline_at', String(now));
+  setSetting(PER_BASELINE, JSON.stringify(next));
+  setSetting(PER_EVENTS, JSON.stringify(trimPeriphEvents(events, now)));
+  const wifi = items.filter((i) => i.section === 'wifi');
+  return {
+    baselineAt: Number(getSetting('device_peripherals_baseline_at')) || null,
+    added,
+    usbDrives: items.filter((i) => i.section === 'disk' && i.usb).length,
+    disks: items.filter((i) => i.section === 'disk').length,
+    keyboards: items.filter((i) => i.section === 'keyboard').length,
+    wifi: {
+      saved: new Set(wifi.map((w) => w.name)).size,
+      openAuto: [...new Set(wifi.filter((w) => w.auto && wifiRisk(w.auth, w.value.split('/')[1]) === 'open').map((w) => w.name))],
+      now: n.wifiNow ?? null,
+      nowOpen: items.some((i) => i.section === 'wifinow'),
+    },
+  };
+}
+
 /* ---------- Tailscale devices (e.g. the phone) ---------- */
 
 export type TailDevice = { name: string; os: string; online: boolean; lastSeen: string | null; self: boolean };
@@ -619,6 +694,7 @@ type Latest = {
   extensions?: ExtSummary | null;
   network?: NetSummary | null;
   system?: SysSummary | null;
+  peripherals?: PeriphSummary | null;
 };
 
 const AUTO_NOTE = 'Fixed — auto-resolved by the device health check';
@@ -795,6 +871,10 @@ async function collect(): Promise<Latest | null> {
   const system = await watchSystem(assetId, s.system, now);
   if (system?.added) changed = true;
 
+  // USB drives, keyboard devices, Wi-Fi.
+  const peripherals = watchPeripherals(assetId, s.peripherals, now);
+  if (peripherals?.added) changed = true;
+
   const latest: Latest = {
     at: now,
     isAdmin: s.isAdmin,
@@ -810,6 +890,7 @@ async function collect(): Promise<Latest | null> {
     extensions,
     network,
     system,
+    peripherals,
   };
   setSetting('device_health_latest', JSON.stringify(latest));
   const bad = checks.filter((c) => c.status === 'bad').length;
@@ -830,13 +911,14 @@ deviceRouter.get('/', (_req, res) => {
   // Open findings about auto-start programs / exclusions (the "flagged" list of one run is only what changed then).
   const findings = all<{ id: number; rule_id: string; severity: string; title: string; summary: string; evidence: string; last_seen: number }>(
     `SELECT id, rule_id, severity, title, summary, evidence, last_seen FROM security_findings
-     WHERE rule_id IN ('persistence_added','defender_exclusion_added','program_installed','browser_extension','network_changed','system_changed') AND status IN ('open','acknowledged') ORDER BY last_seen DESC LIMIT 50`,
+     WHERE rule_id IN ('persistence_added','defender_exclusion_added','program_installed','browser_extension','network_changed','system_changed','device_connected') AND status IN ('open','acknowledged') ORDER BY last_seen DESC LIMIT 50`,
   ).map((f) => ({ id: f.id, ruleId: f.rule_id, severity: f.severity, title: f.title, summary: f.summary, lastSeen: f.last_seen, plainTh: plainFinding({ ruleId: f.rule_id, severity: f.severity, title: f.title, summary: f.summary, evidence: parseJson(f.evidence, {}) }) }));
   const recentPrograms = programEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
   const recentExtensions = extensionEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
   const recentNetwork = networkEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
   const recentSystem = systemEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
-  res.json({ latest, labels: CHECK_LABELS, findings, recentPrograms, recentExtensions, recentNetwork, recentSystem, everyMs: DEVICE_HEALTH_EVERY_MS, running: running != null });
+  const recentPeripherals = peripheralEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
+  res.json({ latest, labels: CHECK_LABELS, findings, recentPrograms, recentExtensions, recentNetwork, recentSystem, recentPeripherals, everyMs: DEVICE_HEALTH_EVERY_MS, running: running != null });
 });
 
 deviceRouter.post('/refresh', async (req, res) => {

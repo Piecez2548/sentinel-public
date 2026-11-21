@@ -48,6 +48,15 @@ const DEVICE_SNAPSHOT = JSON.stringify({
   startup: [{ name: 'svchost', command: 'C:\\Users\\Me\\AppData\\Local\\svchost.exe', location: 'HKU\\S-1\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run', user: 'PC\\me' }],
   tasks: [],
   software: { programs: ['Git'], services: [], apps: [{ name: 'Git 2.44.0', publisher: 'The Git Development Community' }] },
+  peripherals: {
+    disks: [{ id: 'SCSI\\DISK&VEN_NVME&PROD_TEST\\5&1', name: 'Test NVMe', present: true }],
+    disksOk: true,
+    keyboards: [{ id: 'HID\\VID_046D&PID_C232\\2&1&0&0000', name: 'HID Keyboard Device', present: true }],
+    keyboardsOk: true,
+    wifi: [{ ssid: 'Home_5G', auth: 'WPA3SAE', enc: 'AES', mode: 'auto' }],
+    wifiOk: true,
+    wifiNow: 'Home_5G',
+  },
   system: {
     certs: [{ thumb: 'CAFE01', subject: 'CN=Microsoft Root Certificate Authority 2011, O=Microsoft Corporation', store: 'machine' }],
     certsOk: true,
@@ -492,6 +501,10 @@ describe('Monitoring & alerting', () => {
     fixed.system.firewall.push({ id: 'evil', src: 'local', raw: 'v2.33|Action=Allow|Active=TRUE|Dir=In|App=C:\\Users\\me\\AppData\\Local\\Temp\\upd\\svch0st.exe|Name=Windows Update Helper|' });
     fixed.system.settings.wdigest = true;
     fixed.system.settings.smb1 = true;
+    // …and a BadUSB stick was plugged in (drive + Raspberry Pi Pico "keyboard"), and an open Wi-Fi saved to auto-connect.
+    fixed.peripherals.disks.push({ id: 'USBSTOR\\DISK&VEN_GENERIC&PROD_FLASH\\0001', name: 'Generic Flash Disk USB Device', present: true });
+    fixed.peripherals.keyboards.push({ id: 'HID\\VID_2E8A&PID_000A&MI_00\\8&1', name: 'HID Keyboard Device', present: true });
+    fixed.peripherals.wifi.push({ ssid: 'Free Airport WiFi', auth: 'open', enc: 'none', mode: 'auto' });
     fixed.extensions[0].exts.push({ browser: 'Brave', profile: 'Default', id: 'bbbb', name: 'Free VPN', location: 4, fromStore: false, apis: ['proxy'], hosts: ['<all_urls>'] });
     await stopServer();
     await startServer({ SENTINEL_TEST_DEVICE_SNAPSHOT: JSON.stringify(fixed) });
@@ -515,6 +528,10 @@ describe('Monitoring & alerting', () => {
     assert.deepEqual(dev.latest.system.settings.map((x: { id: string }) => x.id), ['wdigest', 'smb1']);
     assert.equal(dev.latest.system.certs.added, 2);
     assert.equal(dev.recentSystem.length, 4);
+    const per = active.filter((f) => f.ruleId === 'device_connected').map((f) => f.severity).sort();
+    assert.deepEqual(per, ['high', 'medium', 'medium'], 'Pico keyboard high; new USB drive and open auto-connect Wi-Fi medium');
+    assert.equal(dev.latest.peripherals.usbDrives, 1);
+    assert.deepEqual(dev.latest.peripherals.wifi.openAuto, ['Free Airport WiFi']);
     assert.equal(dev.latest.extensions.count, 2);
     assert.deepEqual(dev.recentExtensions.map((e: { kind: string; name: string }) => `${e.kind}:${e.name}`), ['added:Free VPN']);
     await stopServer();
@@ -526,6 +543,7 @@ describe('Monitoring & alerting', () => {
     assert.ok(!after.some((f) => f.ruleId === 'browser_extension'), 'extension removed → its finding is resolved');
     assert.ok(!after.some((f) => f.ruleId === 'network_changed'), 'hosts line and proxy removed → resolved');
     assert.ok(!after.some((f) => f.ruleId === 'system_changed'), 'certificate and rule removed, settings switched back → resolved');
+    assert.ok(!after.some((f) => f.ruleId === 'device_connected'), 'devices uninstalled and Wi-Fi forgotten → resolved');
     const ev = (await call('GET', '/device-health', undefined, session)).body.recentPrograms as { kind: string }[];
     assert.equal(ev[0].kind, 'removed');
   });
