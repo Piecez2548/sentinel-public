@@ -54,6 +54,8 @@ before(async () => {
   // Faster rules for the test: CPU ≥ 1 % sustained 60 s; pipeline failing ≥ 1 min.
   assert.equal((await call('POST', '/alerts/rules', { name: 'Test CPU', type: 'host_cpu', severity: 'low', forSec: 60, cooldownSec: 300, params: { threshold: 1 } })).status, 201);
   assert.equal((await call('POST', '/alerts/rules', { name: 'Test pipeline', type: 'pipeline', severity: 'high', cooldownSec: 300, params: { minutes: 1 } })).status, 201);
+  // Game mode mutes CPU alerts while a listed game runs (FC Online by default); the test must not depend on that.
+  assert.equal((await call('PUT', '/processes/game-mode', { enabled: false, processes: [] })).status, 200);
 });
 
 after(async () => {
