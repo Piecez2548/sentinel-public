@@ -86,6 +86,20 @@ html:lang(th) body { line-height: 1.6; }
     min-height: 2rem;
   }
   /* "See all →" style links next to card titles. */
+  /* On/off switches stay small to look at but get a bigger invisible hit area. */
+  main button[role='switch']::after {
+    content: '';
+    position: absolute;
+    inset: -0.625rem;
+  }
+  /* Link-style buttons (names in tables, "add your first one") and sortable table headers. */
+  main button.hover\:underline,
+  main th button {
+    min-height: 2rem;
+  }
+  main a.block.text-sm {
+    padding-block: 0.4rem;
+  }
   /* Only plain inline links: ones with their own layout (block rows, flex, truncated) keep it. */
   main a.text-xs:not(.block):not(.flex):not(.inline-flex):not(.grid):not(.truncate) {
     display: inline-block;

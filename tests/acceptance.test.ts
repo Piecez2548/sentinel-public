@@ -560,6 +560,7 @@ describe('Monitoring & alerting', () => {
     const dev = (await call('GET', '/device-health', undefined, session)).body;
     assert.equal(dev.phones[0].label, 'Pixel 5 (Android)');
     assert.equal(dev.phones[0].battery, 50);
+    assert.equal((await call('GET', '/device-health/phones', undefined, session)).body.phones[0].label, 'Pixel 5 (Android)', 'listed for the Assets page');
     await call('POST', '/device-health/phone-checkin', { id: 'phone-test-0001', hints: { platformVersion: '15.0.0', model: 'Pixel 5' } }, session, android);
     const after = (await call('GET', '/security/findings?ruleId=phone_health&status=active', undefined, session)).body.findings as unknown[];
     assert.equal(after.length, 0, 'updated → resolved');

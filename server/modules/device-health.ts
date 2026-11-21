@@ -943,6 +943,10 @@ function readHints(raw: unknown): PhoneHints {
   };
 }
 
+deviceRouter.get('/phones', (_req, res) => {
+  res.json({ phones: phoneList().map((p) => ({ ...p, stale: Date.now() - p.lastSeen > STALE_MS })) });
+});
+
 deviceRouter.post('/phone-checkin', (req, res) => {
   const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
   const id = typeof b.id === 'string' && PHONE_ID.test(b.id) ? b.id : null;

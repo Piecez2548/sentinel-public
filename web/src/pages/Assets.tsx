@@ -68,6 +68,69 @@ export function WebsiteForm({ site, onClose, onSaved }: { site: Asset | null; on
   );
 }
 
+type Phone = { id: string; label: string; platform: string; os: string; browser: string; browserVersion: string | null; status: 'ok' | 'old' | 'unknown'; detail: string; lastSeen: number; stale: boolean };
+
+/**
+ * Phones and tablets cannot be checked from the PC (Android / iOS allow no remote inspection); they report in
+ * when SENTINEL is opened on them. Listed here so the inventory is complete; details live on Device health.
+ */
+function PhonesSection({ go }: { go: (p: string) => void }) {
+  const { data } = useApi(() => api.get<{ phones: Phone[] }>('/device-health/phones'), [], ['device']);
+  const phones = data?.phones ?? [];
+  const dot = (p: Phone) => (p.status === 'old' ? 'bg-warn' : p.stale || p.status === 'unknown' ? 'bg-muted' : 'bg-ok');
+  const word = (p: Phone) => (p.status === 'old' ? t('No security updates') : p.status === 'unknown' ? t('Version unknown') : p.stale ? t('Not opened lately') : t('OK'));
+  return (
+    <Card
+      className="mt-4"
+      pad={false}
+      title={`📱 ${t('Phones and tablets')}`}
+      right={
+        <button className="text-xs text-muted hover:text-white" onClick={() => go('device')}>
+          {t('Details on Device health')} →
+        </button>
+      }
+    >
+      <p className="px-4 pb-2 text-xs text-muted">{t('Checked only when SENTINEL is opened on them: Android and iOS do not let the PC inspect a phone.')}</p>
+      {phones.length === 0 ? (
+        <Empty>{t('No phone or tablet yet. Open SENTINEL on it once (over Tailscale) and it appears here.')}</Empty>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <Th>{t('Status')}</Th>
+                <Th>{t('Name')}</Th>
+                <Th>{t('Type')}</Th>
+                <Th>{t('System')}</Th>
+                <Th>{t('Last opened')}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {phones.map((p) => (
+                <tr key={p.id} className="border-t border-line">
+                  <Td>
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                      <span className={`size-2 rounded-full ${dot(p)}`} />
+                      {word(p)}
+                    </span>
+                  </Td>
+                  <Td>{p.label}</Td>
+                  <Td>{t(p.platform === 'ipados' ? 'Tablet' : 'Phone')}</Td>
+                  <Td>
+                    {p.os}
+                    <span className="block text-xs text-muted">{`${p.browser}${p.browserVersion ? ` ${p.browserVersion.split('.')[0]}` : ''}`}</span>
+                  </Td>
+                  <Td className="whitespace-nowrap text-muted">{ago(p.lastSeen)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function AssetsPage({ go }: { go: (p: string) => void }) {
   const { data, error, reload } = useApi(() => api.get<{ assets: Asset[] }>('/assets'), [], ['assets']);
   const [modal, setModal] = useState<{ site: Asset | null } | null>(null);
@@ -161,6 +224,7 @@ export default function AssetsPage({ go }: { go: (p: string) => void }) {
           </div>
         )}
       </Card>
+      <PhonesSection go={go} />
       {modal && <WebsiteForm site={modal.site} onClose={() => setModal(null)} onSaved={reload} />}
       {del && (
         <FormModal
