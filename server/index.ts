@@ -27,6 +27,8 @@ import { scanRouter } from './modules/scan.js';
 import { buildDigest, runRetention, systemRouter } from './modules/system.js';
 import { maybeAutoScan, withWeekly } from './modules/weekly.js';
 
+import { hostAllowed } from './lib/host-allow.js';
+
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = process.env.HOST ?? '127.0.0.1';
 
@@ -40,6 +42,14 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', false);
 app.use(express.json({ limit: '64kb' }));
+
+// DNS rebinding: a web page on a name its owner controls can point that name at 127.0.0.1 and talk to
+// SENTINEL "same-origin". Such a request still carries the page's own name in Host, so only names that
+// really belong to this PC are answered.
+app.use((req, res, next) => {
+  if (hostAllowed(req.headers.host)) return next();
+  res.status(421).type('text/plain').send('Unknown host name');
+});
 
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');

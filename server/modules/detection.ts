@@ -4,7 +4,7 @@ import { all, get, getSetting, run, setSetting, tx } from '../db.js';
 import { audit } from '../lib/audit.js';
 import { publish } from '../lib/bus.js';
 import { body, clientIp, HttpError, idParam, num, oneOf, str } from '../lib/http.js';
-import { stepUp } from './auth.js';
+import { checkStepUp, stepUp } from './auth.js';
 import { securityNotice } from './notify.js';
 import { DAY, escHtml, HOUR, MIN, parseJson, SEVERITIES, sevRank } from '../lib/util.js';
 import { L, ruleText, sevText } from '../lib/i18n.js';
@@ -644,6 +644,29 @@ function readStatusChange(b: Record<string, unknown>) {
   return { status, note };
 }
 
+/** Closing these by hand approves the tool / program for good (see loadTrust in device-health). */
+const APPROVES = /^device_protection:\d+:(remote_tools|open_ports):/;
+const CLOSING = new Set(['resolved', 'false_positive', 'closed']);
+
+/** A stolen session must not be able to silence findings: closing one needs the 6-digit unlock. */
+function guardStatusChange(req: import('express').Request, status: string) {
+  if (CLOSING.has(status)) checkStepUp(req);
+}
+
+function approvalNotice(req: import('express').Request, ids: number[], status: string) {
+  if (!CLOSING.has(status) || !ids.length) return;
+  const rows = all<{ fingerprint: string; title: string }>(
+    `SELECT fingerprint, title FROM security_findings WHERE id IN (${ids.map(() => '?').join(',')})`, ...ids,
+  ).filter((r) => APPROVES.test(r.fingerprint));
+  if (!rows.length) return;
+  const names = rows.map((r) => r.title).slice(0, 5).join(', ');
+  securityNotice(
+    `Approved by closing a finding (it will not alert again): ${names}`,
+    `อนุมัติโดยการปิดเรื่องแจ้งเตือน (จะไม่เตือนเรื่องนี้อีก): ${names}`,
+    req,
+  );
+}
+
 function setFindingStatus(id: number, status: string, note: string | undefined, ip: string) {
   const r = run(
     'UPDATE security_findings SET status = ?, note = COALESCE(?, note), resolved_at = ? WHERE id = ?',
@@ -656,7 +679,9 @@ function setFindingStatus(id: number, status: string, note: string | undefined, 
 detectionRouter.put('/findings/:id/status', (req, res) => {
   const id = idParam(req);
   const { status, note } = readStatusChange(body(req));
+  guardStatusChange(req, status);
   if (!setFindingStatus(id, status, note, clientIp(req))) throw new HttpError(404, 'Not found');
+  approvalNotice(req, [id], status);
   publish('findings');
   res.json({ ok: true });
 });
@@ -670,8 +695,11 @@ detectionRouter.post('/findings/bulk-status', (req, res) => {
     throw new HttpError(400, 'ids must be a list of 1–500 finding ids');
   }
   const ids = [...new Set(raw as number[])];
+  guardStatusChange(req, status);
   const ip = clientIp(req);
-  const updated = tx(() => ids.filter((id) => setFindingStatus(id, status, note, ip)).length);
+  const done = tx(() => ids.filter((id) => setFindingStatus(id, status, note, ip)));
+  approvalNotice(req, done, status);
+  const updated = done.length;
   if (updated) publish('findings');
   res.json({ ok: true, updated });
 });

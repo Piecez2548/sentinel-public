@@ -7,7 +7,7 @@ import { publish } from '../lib/bus.js';
 import { body, clientIp, HttpError } from '../lib/http.js';
 import { L } from '../lib/i18n.js';
 import { escHtml } from '../lib/util.js';
-import { requireStepUp, userAgentOf } from './auth.js';
+import { requireStepUp, stepUp, userAgentOf } from './auth.js';
 import { getLocalAssetId } from './host-collector.js';
 import { deviceLabel } from './login-watch.js';
 import { enqueue } from './notify.js';
@@ -196,7 +196,7 @@ processesRouter.post('/kill', async (req, res) => {
   res.json({ ok: true, closed, dryRun: dryRun() });
 });
 
-processesRouter.put('/game-mode', (req, res) => {
+processesRouter.put('/game-mode', stepUp, (req, res) => {
   const b = body(req);
   const raw = Array.isArray(b.processes) ? b.processes : [];
   if (raw.length > 30 || !raw.every((x) => typeof x === 'string' && x.length <= 80)) throw new HttpError(400, 'Up to 30 program names');

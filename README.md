@@ -91,6 +91,7 @@ Don't use `tailscale funnel`, which would put it on the public internet. The web
 | `PORT` / `HOST` | `3001` / `127.0.0.1` | Local only by default |
 | `DATA_DIR` | `data` | Database, key and backups |
 | `ALLOW_PRIVATE_TARGETS` | `false` | `true` to monitor localhost/LAN URLs (blocked by the SSRF guard) |
+| `ALLOWED_HOSTS` | (none) | Extra host names to answer, comma separated. IPs, `localhost` and `*.ts.net` always work (DNS-rebinding guard). |
 | `COOKIE_SECURE` | `false` | `true` when served over HTTPS |
 | `BACKUP_COPY_DIR` | (none) | A cloud-synced folder that receives a copy of every backup |
 | `HEARTBEAT_URL` | (none) | healthchecks.io ping URL (dead man's switch) |

@@ -82,6 +82,7 @@ SENTINEL บอกไม่ได้ว่าตัวเองตาย (ปิ
 | `PORT` / `HOST` | 3001 / 127.0.0.1 | เข้าได้เฉพาะเครื่องนี้ |
 | `DATA_DIR` | `data` | ที่เก็บฐานข้อมูล, key, backups |
 | `ALLOW_PRIVATE_TARGETS` | false | `true` เพื่อเช็ก localhost/LAN (ปกติบล็อกกัน SSRF) |
+| `ALLOWED_HOSTS` | (ไม่มี) | ชื่อเครื่องเพิ่มเติมที่ยอมให้เปิด (คั่นด้วย `,`) — ปกติรับแค่ IP, `localhost` และ `*.ts.net` (กัน DNS rebinding) |
 | `COOKIE_SECURE` | false | `true` เมื่อเปิดผ่าน HTTPS |
 
 ## ข้อมูล, backup, restore

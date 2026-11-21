@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
@@ -119,6 +120,22 @@ describe('Access control (AT-05/06/07)', () => {
     assert.equal((await call('POST', '/assets', { type: 'website', name: 'x', url: 'https://example.com' })).status, 401);
   });
 
+  test('DNS rebinding: requests for a host name that is not this PC are refused', async () => {
+    const status = (host: string) =>
+      new Promise<number>((resolve, reject) => {
+        const r = httpRequest(`${BASE}/api/auth/state`, { headers: { host } }, (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        });
+        r.on('error', reject);
+        r.end();
+      });
+    assert.equal(await status('evil.example.com'), 421);
+    assert.equal(await status(`attacker.example:${PORT}`), 421);
+    assert.equal(await status(`localhost:${PORT}`), 200);
+    assert.equal(await status('my-pc.tailnet-example.ts.net:8443'), 200);
+  });
+
   test('cross-origin state changes are rejected', async () => {
     const r = await call('POST', '/incidents', { title: 'csrf test' }, session, { origin: 'https://evil.example' });
     assert.equal(r.status, 403);
@@ -179,6 +196,32 @@ describe('Access control (AT-05/06/07)', () => {
     assert.equal((await call('PUT', '/settings', { digestHour: 8 }, session)).status, 423, 'settings need the code');
     assert.equal((await call('PUT', '/security/rules/brute_force', { enabled: false }, session)).status, 423, 'turning detection off needs the code');
     assert.equal((await call('POST', '/notifications/channels', { botToken: '1:x', chatId: '1' }, session)).status, 423, 'redirecting alerts needs the code');
+    assert.equal((await call('PUT', '/processes/game-mode', { enabled: true, processes: ['malware'] }, session)).status, 423, 'game mode silences alerts: needs the code');
+    assert.equal((await call('POST', '/security/findings/bulk-status', { ids: [999_999], status: 'resolved', note: 'x' }, session)).status, 423, 'closing findings needs the code');
+    assert.equal((await call('PUT', '/security/findings/999999/status', { status: 'false_positive', note: 'x' }, session)).status, 423, 'false positive needs the code');
+    assert.equal((await call('POST', '/security/findings/bulk-status', { ids: [999_999], status: 'acknowledged' }, session)).status, 200, 'acknowledging does not');
+
+    // Signing in again with the right password must not reset the wrong-2FA-code counter (lockout bypass).
+    const fails = () => {
+      const d = new DatabaseSync(join(dataDir, 'sentinel.db'));
+      const n = (d.prepare('SELECT failed_attempts AS n FROM admin_account').get() as { n: number }).n;
+      d.close();
+      return n;
+    };
+    const wrongCode = () => {
+      const near = [-1, 0, 1, 2].map((d) => hotp(secret, currentStep() + d));
+      let w = '000000';
+      for (let i = 1; near.includes(w); i++) w = String(i).padStart(6, '0');
+      return w;
+    };
+    const z = new DatabaseSync(join(dataDir, 'sentinel.db'));
+    z.prepare('UPDATE admin_account SET failed_attempts = 0').run();
+    z.close();
+    const p1 = (await call('POST', '/auth/login', { password: PASSWORD })).cookie!;
+    for (let i = 0; i < 2; i++) assert.equal((await call('POST', '/auth/mfa', { code: wrongCode() }, p1)).status, 401);
+    const p2 = (await call('POST', '/auth/login', { password: PASSWORD })).cookie!;
+    assert.equal((await call('POST', '/auth/mfa', { code: wrongCode() }, p2)).status, 401);
+    assert.equal(fails(), 3, 'wrong codes keep counting across password sign-ins');
 
     // Turn MFA off again for the remaining tests.
     await waitFor(async () => currentStep() > currentStep() - 1 || undefined);

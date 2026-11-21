@@ -215,13 +215,14 @@ authRouter.post('/login', async (req, res) => {
     recordFailure(ip, 'bad_password', uaOf(req));
     throw new HttpError(401, 'Wrong password');
   }
-  run('UPDATE admin_account SET failed_attempts = 0, locked_until = NULL WHERE id = 1');
-
   if (admin.totp_enabled) {
+    // The wrong-try counter is cleared only once the 6-digit code passes too. Clearing it here let anyone
+    // who knows the password sign in again after every few wrong codes and guess 2FA codes forever.
     createSession(req, res, true);
     res.json({ mfaRequired: true });
     return;
   }
+  run('UPDATE admin_account SET failed_attempts = 0, locked_until = NULL WHERE id = 1');
   createSession(req, res, false);
   audit('auth.login', { ip });
   watch(() => onLoginSuccess(ip, uaOf(req)));
@@ -233,6 +234,7 @@ authRouter.post('/mfa', (req, res) => {
   const s = currentSession(req);
   const admin = getAdmin();
   if (!s || !s.mfa_pending || !admin?.totp_enabled || !admin.totp_secret_enc) throw new HttpError(401, 'Sign in with your password first');
+  if (ipBlocked(ip)) throw new HttpError(429, 'Too many attempts from this address. Try again later.');
   const locked = lockedFor(admin);
   if (locked) throw new HttpError(429, `Account locked. Try again in ${Math.ceil(locked / 60_000)} minute(s).`);
 
@@ -519,9 +521,14 @@ authRouter.post('/lock', (req, res) => {
  * A function declaration on purpose — it is hoisted, so routers in import cycles can use it.
  */
 export function stepUp(req: Request, _res: Response, next: NextFunction) {
+  checkStepUp(req);
+  next();
+}
+
+/** The same check as `stepUp`, for routes where only some requests are sensitive. */
+export function checkStepUp(req: Request): void {
   // Before 2FA is set up there is no second factor to ask for (power control still refuses).
   if (getAdmin()?.totp_enabled) requireStepUp(req, body(req).code);
-  next();
 }
 
 export const userAgentOf = uaOf;
