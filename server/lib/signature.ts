@@ -1,3 +1,4 @@
+import './ps-env.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 

@@ -25,7 +25,7 @@ test('signerName extracts the CN, including quoted names', () => {
 // cmd.exe exists on every Windows edition (Windows Server, e.g. the CI runner, has no notepad.exe).
 test('checkSignature on real Windows binaries', { skip: process.platform !== 'win32' }, async () => {
   const signed = await checkSignature(`"${process.env.SystemRoot}\\System32\\cmd.exe"`);
-  assert.equal(signed.state, 'signed');
+  assert.equal(signed.state, 'signed', JSON.stringify(signed));
   const missing = await checkSignature('"C:\\definitely\\not\\here.exe"');
   assert.equal(missing.state, 'unknown');
   // An unsigned script stands in for an unsigned service binary.

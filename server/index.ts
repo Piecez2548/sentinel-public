@@ -1,3 +1,4 @@
+import './lib/ps-env.js'; // must stay first: fixes PSModulePath for powershell.exe children
 import express from 'express';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
