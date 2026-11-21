@@ -45,6 +45,8 @@ export function plainFinding(f: Input): PlainText | null {
       if (f.severity === 'high') return { title: `${what}ใหม่ ไม่รู้ว่าใครสร้าง: ${name}`, summary: 'ไม่มีลายเซ็นยืนยัน หรือชี้ไปที่ไฟล์ที่ไม่มีอยู่แล้ว', fix: `ถ้าไม่ได้ติดตั้งเอง: ${fix}` };
       return { title: `${what}ใหม่: ${name}`, summary: 'ตรวจไม่ได้ว่าใครสร้าง', fix: `ถ้าไม่รู้จัก: ${fix}` };
     }
+    case 'phone_health':
+      return { title: str(d.headlineTh) || f.title, summary: `${str(d.os)} ไม่ได้รับการแก้ช่องโหว่ใหม่แล้ว`, fix: 'อัปเดตระบบในหน้า Software update ของเครื่อง ถ้าไม่มีเวอร์ชันใหม่ให้แล้ว ควรเปลี่ยนเครื่อง' };
     case 'device_connected': {
       const th = str(d.headlineTh);
       const section = str(d.section);

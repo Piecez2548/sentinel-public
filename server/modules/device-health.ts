@@ -10,7 +10,7 @@ import { audit } from '../lib/audit.js';
 import { publish } from '../lib/bus.js';
 import { exclusionRisk, SYSTEM_BINARIES, type ExclusionKind } from '../lib/exclusions.js';
 import { registerComponent, reportError, reportOk } from '../lib/health.js';
-import { clientIp } from '../lib/http.js';
+import { clientIp, HttpError } from '../lib/http.js';
 import { checkSignature, imagePathToFile } from '../lib/signature.js';
 import { DAY, MIN, parseJson } from '../lib/util.js';
 import { checkMessage, persistenceMessage, type PersistVerdict } from '../lib/device-messages.js';
@@ -20,6 +20,7 @@ import { appKey, iconExe, judgeApp, newApps, pickExes, programMessage, removedKe
 import { diffExtensions, extensionMessage, judgeExt, trimExtEvents, type ExtBaseline, type ExtEvent, type ExtProfile, type ExtVerdict } from '../lib/browser-ext.js';
 import { readBrowserExtensions } from '../lib/browser-ext-read.js';
 import { diffNet, keyParts, netMessage, trimNetEvents, type NetBaseline, type NetEvent, type NetSnap } from '../lib/net-watch.js';
+import { judgePhone, mergeCheckin, parsePhone, PHONE_ID, STALE_MS, type PhoneHints, type PhoneRecord } from '../lib/phone-health.js';
 import { diffPeriph, judgePeriph, periphMessage, periphSectionOf, trimPeriphEvents, wifiRisk, type PeriphBaseline, type PeriphEvent, type PeriphSnap } from '../lib/periph-watch.js';
 import { diffSys, expandApp, judgeSys, sectionOf, settingName, sysMessage, trimSysEvents, type Sig, type SysBaseline, type SysEvent, type SysItem, type SysSnap } from '../lib/sys-watch.js';
 import { upsertFinding } from './detection.js';
@@ -911,14 +912,71 @@ deviceRouter.get('/', (_req, res) => {
   // Open findings about auto-start programs / exclusions (the "flagged" list of one run is only what changed then).
   const findings = all<{ id: number; rule_id: string; severity: string; title: string; summary: string; evidence: string; last_seen: number }>(
     `SELECT id, rule_id, severity, title, summary, evidence, last_seen FROM security_findings
-     WHERE rule_id IN ('persistence_added','defender_exclusion_added','program_installed','browser_extension','network_changed','system_changed','device_connected') AND status IN ('open','acknowledged') ORDER BY last_seen DESC LIMIT 50`,
+     WHERE rule_id IN ('persistence_added','defender_exclusion_added','program_installed','browser_extension','network_changed','system_changed','device_connected','phone_health') AND status IN ('open','acknowledged') ORDER BY last_seen DESC LIMIT 50`,
   ).map((f) => ({ id: f.id, ruleId: f.rule_id, severity: f.severity, title: f.title, summary: f.summary, lastSeen: f.last_seen, plainTh: plainFinding({ ruleId: f.rule_id, severity: f.severity, title: f.title, summary: f.summary, evidence: parseJson(f.evidence, {}) }) }));
   const recentPrograms = programEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
   const recentExtensions = extensionEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
   const recentNetwork = networkEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
   const recentSystem = systemEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
   const recentPeripherals = peripheralEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
-  res.json({ latest, labels: CHECK_LABELS, findings, recentPrograms, recentExtensions, recentNetwork, recentSystem, recentPeripherals, everyMs: DEVICE_HEALTH_EVERY_MS, running: running != null });
+  const phones = phoneList().map((p) => ({ ...p, stale: Date.now() - p.lastSeen > STALE_MS }));
+  res.json({ latest, labels: CHECK_LABELS, findings, phones, recentPrograms, recentExtensions, recentNetwork, recentSystem, recentPeripherals, everyMs: DEVICE_HEALTH_EVERY_MS, running: running != null });
+});
+
+/* ---------- phones / tablets (check-in when SENTINEL is opened on them) ---------- */
+
+const PHONES = 'phone_checkins';
+const phoneFp = (id: string) => `phone_health:${id}`;
+export const phoneList = (): PhoneRecord[] => parseJson<PhoneRecord[]>(getSetting(PHONES) ?? '[]', []);
+
+/** Only plain, short values from the page are kept; everything is display-only except the OS version. */
+function readHints(raw: unknown): PhoneHints {
+  const h = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const s = (v: unknown, max: number, re: RegExp) => (typeof v === 'string' && v.length <= max && re.test(v) ? v : undefined);
+  const b = h.battery && typeof h.battery === 'object' ? (h.battery as Record<string, unknown>) : null;
+  return {
+    platformVersion: s(h.platformVersion, 20, /^[\d.]+$/),
+    model: s(h.model, 40, /^[\w .+()-]*$/),
+    touch: h.touch === true,
+    battery: b ? { level: typeof b.level === 'number' ? b.level : undefined, charging: typeof b.charging === 'boolean' ? b.charging : undefined } : null,
+    standalone: h.standalone === true,
+  };
+}
+
+deviceRouter.post('/phone-checkin', (req, res) => {
+  const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+  const id = typeof b.id === 'string' && PHONE_ID.test(b.id) ? b.id : null;
+  if (!id) throw new HttpError(400, 'id must be 8–64 letters, digits or dashes');
+  const hints = readHints(b.hints);
+  const info = parsePhone(String(req.headers['user-agent'] ?? '').slice(0, 400), hints);
+  if (!info) return res.json({ ok: true, ignored: 'not a phone or tablet' });
+  const now = Date.now();
+  const { list, rec, before } = mergeCheckin(phoneList(), id, info, hints, now);
+  setSetting(PHONES, JSON.stringify(list));
+  if (rec.status === 'old') {
+    const v = judgePhone(info);
+    const th = `📱 <b>${rec.label}: ระบบเก่าจนไม่ได้รับอัปเดตความปลอดภัยแล้ว</b>\n${rec.os} — ช่องโหว่ใหม่จะไม่ถูกแก้\n\n👉 <b>วิธีแก้:</b> ${info.platform === 'android' ? 'Settings → System → Software update ถ้าไม่มีเวอร์ชันใหม่ให้แล้ว ควรเปลี่ยนเครื่อง' : 'Settings → General → Software Update ถ้าไม่มีเวอร์ชันใหม่ให้แล้ว ควรเปลี่ยนเครื่อง'}`;
+    const en = `📱 <b>${rec.label}: the system no longer gets security updates</b>\n${v.detail}\n\n👉 <b>Fix:</b> ${info.platform === 'android' ? 'Settings → System → Software update; if nothing newer is offered, plan to replace the phone' : 'Settings → General → Software Update; if nothing newer is offered, plan to replace the device'}`;
+    upsertFinding({
+      notify: { en, th },
+      ruleId: 'phone_health',
+      assetId: getLocalAssetId(),
+      severity: 'medium',
+      title: `${rec.label}: ${rec.os} no longer gets security updates`,
+      summary: v.detail,
+      fingerprint: phoneFp(id),
+      condition: 'Phone / tablet check-in when SENTINEL is opened on it',
+      extra: { details: { device: rec.label, os: rec.os, browser: `${rec.browser} ${rec.browserVersion ?? ''}`.trim(), headlineTh: `${rec.label}: ระบบเก่าจนไม่ได้รับอัปเดตความปลอดภัยแล้ว`, assessment: v.detail } },
+      mergeWindowMs: 365 * DAY,
+    });
+    publish('findings');
+  } else if (before?.status === 'old') {
+    run("UPDATE security_findings SET status = 'resolved', resolved_at = ?, note = 'Updated — auto-resolved' WHERE fingerprint = ? AND status IN ('open','acknowledged')", now, phoneFp(id));
+    publish('findings');
+  }
+  if (!before) audit('phone.first_checkin', { ip: clientIp(req), detail: { label: rec.label, os: rec.os } });
+  publish('device');
+  res.json({ ok: true, status: rec.status, os: rec.os });
 });
 
 deviceRouter.post('/refresh', async (req, res) => {

@@ -30,6 +30,7 @@ type SysSummary = {
   settings: { id: string; name: string }[];
   readable: { cert: boolean; firewall: boolean; setting: boolean };
 };
+type Phone = { id: string; label: string; platform: string; os: string; browser: string; browserVersion: string | null; status: 'ok' | 'old' | 'unknown'; detail: string; lastSeen: number; battery: number | null; charging: boolean | null; standalone: boolean; stale: boolean };
 type PeriphSummary = { baselineAt: number | null; added: number; usbDrives: number; disks: number; keyboards: number; wifi: { saved: number; openAuto: string[]; now: string | null; nowOpen: boolean } };
 type PeriphEvent = { kind: 'added' | 'removed'; section: 'disk' | 'keyboard' | 'wifi' | 'wifinow'; name: string; value: string; at: number; severity?: string };
 type SysEvent = { kind: 'added' | 'removed'; section: 'cert' | 'firewall' | 'setting'; name: string; value: string; at: number; severity?: string };
@@ -39,6 +40,7 @@ type ProgramEvent = { kind: 'added' | 'removed'; name: string; version?: string;
 type Resp = {
   latest: Latest | null;
   labels: Record<string, string>;
+  phones?: Phone[];
   findings: { id: number; ruleId: string; severity: string; title: string; summary: string; lastSeen: number; plainTh?: PlainText | null }[];
   recentPrograms?: ProgramEvent[];
   recentExtensions?: ExtEvent[];
@@ -212,6 +214,37 @@ function NetworkCard({ l, events, findings, go }: { l: Latest; events: NetEvent[
             ))}
           </ul>
         </>
+      )}
+    </Card>
+  );
+}
+
+/** Phones and tablets that opened SENTINEL: system version still patched?, battery, last seen. */
+function PhonesCard({ phones, findings, go }: { phones: Phone[]; findings: Resp['findings']; go: (p: string) => void }) {
+  const tone = (p: Phone) => (p.status === 'old' ? 'text-warn' : p.status === 'ok' ? 'text-ok' : 'text-muted');
+  const word = (p: Phone) => (p.status === 'old' ? t('No security updates') : p.status === 'ok' ? t('Gets security updates') : t('Version unknown'));
+  return (
+    <Card title={`📱 ${t('Phones and tablets')}`}>
+      <p className="mb-3 text-xs text-muted">{t('Android and iOS do not let apps inspect the phone, so this shows what the browser reports each time you open SENTINEL on it. A system that no longer gets security updates → medium.')}</p>
+      <FindingList findings={findings} go={go} />
+      {phones.length === 0 ? (
+        <Empty>{t('No phone or tablet yet. Open SENTINEL on it once (over Tailscale) and it appears here.')}</Empty>
+      ) : (
+        <ul className="divide-y divide-line text-sm">
+          {phones.map((p) => (
+            <li key={p.id} className="flex items-start gap-3 py-2">
+              <span>{p.platform === 'android' ? '🤖' : '🍎'}</span>
+              <span className="min-w-0 flex-1">
+                <span className="break-words">{p.label}</span>
+                <span className="block text-xs text-muted">
+                  {[p.os, `${p.browser}${p.browserVersion ? ` ${p.browserVersion.split('.')[0]}` : ''}`, p.battery != null ? `🔋 ${p.battery}%${p.charging ? ` ${t('charging')}` : ''}` : null, p.standalone ? t('home-screen app') : null].filter(Boolean).join(' · ')}
+                </span>
+                <span className="block text-xs text-muted">{p.stale ? t('Not opened for over 2 weeks — last {when}', { when: ago(p.lastSeen) }) : t('Last opened {when}', { when: ago(p.lastSeen) })}</span>
+              </span>
+              <span className={`whitespace-nowrap text-xs ${tone(p)}`}>{word(p)}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </Card>
   );
@@ -425,10 +458,11 @@ export default function DevicePage({ go }: { go: (p: string) => void }) {
   const ok = checks.filter((c) => c.status === 'ok').length;
   const known = checks.filter((c) => c.status !== 'unknown').length;
   const worst = checks[0]?.status ?? 'unknown';
-  const autostart = (data?.findings ?? []).filter((f) => !['program_installed', 'browser_extension', 'network_changed', 'system_changed', 'device_connected'].includes(f.ruleId));
+  const autostart = (data?.findings ?? []).filter((f) => !['program_installed', 'browser_extension', 'network_changed', 'system_changed', 'device_connected', 'phone_health'].includes(f.ruleId));
   const netFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'network_changed');
   const sysFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'system_changed');
   const perFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'device_connected');
+  const phoneFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'phone_health');
   const extFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'browser_extension');
   const programFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'program_installed');
 
@@ -523,6 +557,8 @@ export default function DevicePage({ go }: { go: (p: string) => void }) {
           </div>
 
           <div className="space-y-4">
+            <PhonesCard phones={data.phones ?? []} findings={phoneFindings} go={go} />
+
             <Card title={t('Devices on your Tailscale network')}>
               {l.devices == null ? (
                 <Empty>{t('Tailscale is not available on this PC.')}</Empty>

@@ -67,6 +67,7 @@ const RULE_TH: Record<string, string> = {
   program_installed: 'มีการติดตั้งโปรแกรมใหม่',
   browser_extension: 'มีส่วนขยายเบราว์เซอร์ใหม่',
   network_changed: 'ไฟล์ hosts / DNS / proxy เปลี่ยน',
+  phone_health: 'มือถือ/แท็บเล็ตไม่ได้รับอัปเดตความปลอดภัย',
   device_connected: 'มี USB / คีย์บอร์ด / Wi-Fi ใหม่',
   system_changed: 'ใบรับรอง / ไฟร์วอลล์ / การตั้งค่าความปลอดภัยเปลี่ยน',
   sentinel_login_failed: 'มีคนเดารหัสผ่านเข้า SENTINEL',

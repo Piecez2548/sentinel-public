@@ -548,6 +548,23 @@ describe('Monitoring & alerting', () => {
     assert.equal(ev[0].kind, 'removed');
   });
 
+  test('phone check-in: an Android without security updates is flagged, updating resolves it, a PC is ignored', async () => {
+    const android = { 'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' };
+    assert.equal((await call('POST', '/device-health/phone-checkin', { id: 'x' }, session, android)).status, 400, 'bad id refused');
+    const pc = await call('POST', '/device-health/phone-checkin', { id: 'pc-12345678' }, session);
+    assert.ok(pc.body.ignored, 'a PC browser is not a phone');
+    const old = await call('POST', '/device-health/phone-checkin', { id: 'phone-test-0001', hints: { platformVersion: '12.0.0', model: 'Pixel 5', battery: { level: 0.5, charging: false } } }, session, android);
+    assert.deepEqual([old.body.status, old.body.os], ['old', 'Android 12']);
+    const open = (await call('GET', '/security/findings?ruleId=phone_health', undefined, session)).body.findings as { severity: string; status: string }[];
+    assert.deepEqual(open.map((f) => f.severity), ['medium']);
+    const dev = (await call('GET', '/device-health', undefined, session)).body;
+    assert.equal(dev.phones[0].label, 'Pixel 5 (Android)');
+    assert.equal(dev.phones[0].battery, 50);
+    await call('POST', '/device-health/phone-checkin', { id: 'phone-test-0001', hints: { platformVersion: '15.0.0', model: 'Pixel 5' } }, session, android);
+    const after = (await call('GET', '/security/findings?ruleId=phone_health&status=active', undefined, session)).body.findings as unknown[];
+    assert.equal(after.length, 0, 'updated → resolved');
+  });
+
   test('weekly automatic scan: shown with the scan status, owner can change it, bad values refused', async () => {
     const st = (await call('GET', '/device-health/scan', undefined, session)).body;
     assert.deepEqual({ enabled: st.auto.enabled, day: st.auto.day, hour: st.auto.hour }, { enabled: true, day: 0, hour: 20 }, 'default Sunday 20:00');

@@ -6,6 +6,7 @@ import { Button, Input, PageSkeleton } from './components/ui';
 import { api, type ComponentHealth } from './lib/api';
 import { setLang, t, useLang } from './lib/i18n';
 import { LiveBus, LiveContext, useApi, useRoute } from './lib/hooks';
+import { phoneCheckin } from './lib/phone-checkin';
 // Each page (and ECharts, used by several) loads on first visit instead of in one large bundle.
 const AlertsPage = lazy(() => import('./pages/Alerts'));
 const ApplicationsPage = lazy(() => import('./pages/Applications'));
@@ -212,6 +213,14 @@ function ShellInner({ route, go, connected, onLogout, navOpen, setNavOpen }: { r
     ['alerts', 'findings', 'incidents', 'assets', 'health'],
     30_000,
   );
+
+  // Phones / tablets report their system version when SENTINEL is opened (and when it comes back to the front).
+  useEffect(() => {
+    void phoneCheckin();
+    const onVis = () => document.visibilityState === 'visible' && void phoneCheckin();
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   useEffect(() => {
     const n = (b?.alerts ?? 0) + (b?.down ?? 0);
