@@ -22,8 +22,9 @@ test('signerName extracts the CN, including quoted names', () => {
   assert.equal(signerName('CN="OpenAI OpCo, LLC", O="OpenAI OpCo, LLC", C=US'), 'OpenAI OpCo, LLC');
 });
 
+// cmd.exe exists on every Windows edition (Windows Server, e.g. the CI runner, has no notepad.exe).
 test('checkSignature on real Windows binaries', { skip: process.platform !== 'win32' }, async () => {
-  const signed = await checkSignature(`"${process.env.SystemRoot}\\System32\\notepad.exe"`);
+  const signed = await checkSignature(`"${process.env.SystemRoot}\\System32\\cmd.exe"`);
   assert.equal(signed.state, 'signed');
   const missing = await checkSignature('"C:\\definitely\\not\\here.exe"');
   assert.equal(missing.state, 'unknown');
