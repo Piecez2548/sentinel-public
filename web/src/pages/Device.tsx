@@ -17,9 +17,19 @@ type Latest = {
   devices: TailDevice[] | null;
   programs?: { count: number; baselineAt: number | null; added: number } | null;
   extensions?: { count: number; baselineAt: number | null; added: number; list: InstalledExt[] } | null;
+  system?: SysSummary | null;
   network?: { baselineAt: number | null; added: number; hosts: { name: string; ip: string }[]; dns: { name: string; servers: string[] }[]; proxies: { name: string; value: string }[]; rules: { name: string; value: string }[] } | null;
 };
 type NetEvent = { kind: 'added' | 'removed'; what: string; name: string; value: string; at: number; severity?: string };
+type SysSummary = {
+  baselineAt: number | null;
+  added: number;
+  certs: { total: number; added: number; byHand: { name: string; store: string; until?: string }[] };
+  firewall: { total: number; open: number };
+  settings: { id: string; name: string }[];
+  readable: { cert: boolean; firewall: boolean; setting: boolean };
+};
+type SysEvent = { kind: 'added' | 'removed'; section: 'cert' | 'firewall' | 'setting'; name: string; value: string; at: number; severity?: string };
 type InstalledExt = { browser: string; profile: string; id: string; name: string; version?: string; severity: string; reason: string; powers: string[] };
 type ExtEvent = { kind: 'added' | 'removed' | 'gained'; name: string; browser: string; at: number; severity?: string; reason?: string; powers?: string[] };
 type ProgramEvent = { kind: 'added' | 'removed'; name: string; version?: string; publisher?: string; at: number; severity?: string; reason?: string; signer?: string };
@@ -30,6 +40,7 @@ type Resp = {
   recentPrograms?: ProgramEvent[];
   recentExtensions?: ExtEvent[];
   recentNetwork?: NetEvent[];
+  recentSystem?: SysEvent[];
   everyMs: number;
   running: boolean;
 };
@@ -191,6 +202,70 @@ function NetworkCard({ l, events, findings, go }: { l: Latest; events: NetEvent[
   );
 }
 
+const SYS_WHAT: Record<SysEvent['section'], string> = { cert: 'Root certificate', firewall: 'Firewall rule', setting: 'Security setting' };
+const STORE_LABEL: Record<string, string> = { machine: 'whole PC', user: 'this user only', policy: 'set by policy', enterprise: 'enterprise store', authroot: 'Windows root update' };
+
+/** Trusted root certificates, inbound firewall allow rules and risky security switches. */
+function SystemCard({ l, events, findings, go }: { l: Latest; events: SysEvent[]; findings: Resp['findings']; go: (p: string) => void }) {
+  const s = l.system;
+  const row = (label: string, value: string, warn = false) => (
+    <li className="flex items-start justify-between gap-3 py-1.5">
+      <span className="text-muted">{label}</span>
+      <span className={`min-w-0 break-words text-right ${warn ? 'text-warn' : ''}`}>{value}</span>
+    </li>
+  );
+  return (
+    <Card title={`🛡️ ${t('Certificates, firewall and security settings')}`}>
+      <p className="mb-3 text-xs text-muted">
+        {s ? t('Watched every 30 minutes. An unknown root certificate, a firewall rule for a program in a temp folder or for any program on every port, Remote Desktop, WDigest or the Guest account turned on → high.') : t('Not read yet.')}
+        {s?.baselineAt && ` ${t('Baseline taken {when}.', { when: ago(s.baselineAt) })}`}
+      </p>
+      <FindingList findings={findings} go={go} />
+      {s && (
+        <ul className="mb-3 divide-y divide-line text-sm">
+          {row(t('Root certificates'), s.readable.cert ? t('{n} trusted · {m} added outside Windows\' own list', { n: s.certs.total, m: s.certs.added }) : t('Could not read'))}
+          {row(t('Firewall: inbound allow rules'), s.readable.firewall ? t('{n} rules · {m} from programs', { n: s.firewall.total, m: s.firewall.open }) : t('Could not read'))}
+          {s.readable.setting
+            ? s.settings.length
+              ? s.settings.map((x) => <span key={x.id}>{row(t('Security setting'), t(x.name), true)}</span>)
+              : row(t('Security settings'), t('All safe'))
+            : row(t('Security settings'), t('Could not read'))}
+        </ul>
+      )}
+      {s && s.certs.byHand.length > 0 && (
+        <details className="mb-3 text-sm">
+          <summary className="cursor-pointer text-xs text-muted">{t('Root certificates added outside Windows\' own list ({n})', { n: s.certs.byHand.length })}</summary>
+          <ul className="mt-1 divide-y divide-line">
+            {s.certs.byHand.map((c, i) => (
+              <li key={i} className="py-1.5">
+                <span className="break-words">{c.name}</span>
+                <span className="block text-xs text-muted">{[t(STORE_LABEL[c.store] ?? c.store), c.until ? t('valid until {date}', { date: c.until }) : null].filter(Boolean).join(' · ')}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {events.length > 0 && (
+        <>
+          <p className="mb-1 text-xs font-medium text-muted">{t('Last 30 days')}</p>
+          <ul className="divide-y divide-line text-sm">
+            {events.map((e, i) => (
+              <li key={i} className="flex items-start gap-2 py-2">
+                <span>{e.kind === 'removed' ? '🗑️' : e.severity === 'high' ? '🟠' : e.severity === 'medium' ? '🟡' : '🆕'}</span>
+                <span className="min-w-0 flex-1 break-words">
+                  {t(SYS_WHAT[e.section] ?? e.section)}: {e.section === 'setting' ? t(e.name) : e.name}
+                  <span className="block text-xs text-muted">{e.kind === 'removed' ? t('Removed') : e.section === 'cert' ? t(STORE_LABEL[e.value] ?? e.value) : e.section === 'firewall' ? e.value : t('Turned on')}</span>
+                </span>
+                <span className="whitespace-nowrap text-xs text-muted">{ago(e.at)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Card>
+  );
+}
+
 /** Extensions in every Chromium browser on the PC, what changed lately, and open findings about them. */
 function ExtensionsCard({ l, events, findings, go }: { l: Latest; events: ExtEvent[]; findings: Resp['findings']; go: (p: string) => void }) {
   const list = [...(l.extensions?.list ?? [])].sort((a, b) => (SEV_ORDER[a.severity] ?? 3) - (SEV_ORDER[b.severity] ?? 3) || a.name.localeCompare(b.name));
@@ -286,8 +361,9 @@ export default function DevicePage({ go }: { go: (p: string) => void }) {
   const ok = checks.filter((c) => c.status === 'ok').length;
   const known = checks.filter((c) => c.status !== 'unknown').length;
   const worst = checks[0]?.status ?? 'unknown';
-  const autostart = (data?.findings ?? []).filter((f) => !['program_installed', 'browser_extension', 'network_changed'].includes(f.ruleId));
+  const autostart = (data?.findings ?? []).filter((f) => !['program_installed', 'browser_extension', 'network_changed', 'system_changed'].includes(f.ruleId));
   const netFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'network_changed');
+  const sysFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'system_changed');
   const extFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'browser_extension');
   const programFindings = (data?.findings ?? []).filter((f) => f.ruleId === 'program_installed');
 
@@ -377,6 +453,7 @@ export default function DevicePage({ go }: { go: (p: string) => void }) {
             <ProgramsCard l={l} events={data.recentPrograms ?? []} findings={programFindings} go={go} />
             <ExtensionsCard l={l} events={data.recentExtensions ?? []} findings={extFindings} go={go} />
             <NetworkCard l={l} events={data.recentNetwork ?? []} findings={netFindings} go={go} />
+            <SystemCard l={l} events={data.recentSystem ?? []} findings={sysFindings} go={go} />
           </div>
 
           <div className="space-y-4">

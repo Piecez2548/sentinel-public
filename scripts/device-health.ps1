@@ -147,6 +147,68 @@ $network = Try-Get {
   [ordered]@{ hosts = $hosts; hostsOk = $hostsOk; dns = $dns; dnsOk = $dnsOk; proxies = $proxies; proxyOk = $proxyOk; winhttp = $winhttp; nrpt = $nrpt; nrptOk = $nrptOk }
 }
 
+# Trusted root certificates, inbound firewall "allow" rules and a few security settings (read-only).
+# Each list has an *Ok flag so "nothing there" is not mistaken for "could not read".
+$system = Try-Get {
+  $certsOk = $true; $fwOk = $true; $setOk = $true
+  # Which physical store each root lives in (the Cert: drive merges them): the registry key names are thumbprints.
+  # Order = most suspicious first: a root added for this user only, by policy, by an "enterprise", by hand on the machine,
+  # or by Windows' own automatic root update (AuthRoot).
+  $physical = @(
+    @{ who = 'user'; path = 'HKCU:\SOFTWARE\Microsoft\SystemCertificates\Root\Certificates' },
+    @{ who = 'policy'; path = 'HKLM:\SOFTWARE\Policies\Microsoft\SystemCertificates\Root\Certificates' },
+    @{ who = 'enterprise'; path = 'HKLM:\SOFTWARE\Microsoft\EnterpriseCertificates\Root\Certificates' },
+    @{ who = 'machine'; path = 'HKLM:\SOFTWARE\Microsoft\SystemCertificates\Root\Certificates' },
+    @{ who = 'authroot'; path = 'HKLM:\SOFTWARE\Microsoft\SystemCertificates\AuthRoot\Certificates' }
+  )
+  $storeOf = @{}
+  foreach ($ps in $physical) { Get-ChildItem -LiteralPath $ps.path -ErrorAction SilentlyContinue | ForEach-Object { $t = ([string]$_.PSChildName).ToUpper(); if (-not $storeOf.ContainsKey($t)) { $storeOf[$t] = $ps.who } } }
+  $seen = @{}
+  $certs = @(try {
+    foreach ($path in @('Cert:\CurrentUser\Root', 'Cert:\LocalMachine\Root')) {
+      Get-ChildItem -LiteralPath $path -ErrorAction Stop | ForEach-Object {
+        $tp = ([string]$_.Thumbprint).ToUpper()
+        if (-not $seen.ContainsKey($tp)) {
+          $seen[$tp] = $true
+          $who = if ($storeOf.ContainsKey($tp)) { $storeOf[$tp] } else { 'machine' }
+          [ordered]@{ thumb = $tp; subject = [string]$_.Subject; issuer = [string]$_.Issuer; friendly = [string]$_.FriendlyName; until = $_.NotAfter.ToString('yyyy-MM-dd'); store = $who }
+        }
+      }
+    }
+  } catch { $certsOk = $false })
+  # Firewall rules straight from the registry (fast; Get-NetFirewallRule with filters takes minutes).
+  # Only enabled inbound Allow rules are kept; the raw text is parsed on the Node side.
+  $fw = @(try {
+    foreach ($src in @(@{ who = 'local'; path = 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules' }, @{ who = 'policy'; path = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall\FirewallRules' })) {
+      if (-not (Test-Path -LiteralPath $src.path)) { continue }
+      $k = Get-Item -LiteralPath $src.path -ErrorAction Stop
+      foreach ($n in $k.GetValueNames()) {
+        $v = [string]$k.GetValue($n)
+        if ($v -match '\|Action=Allow\|' -and $v -match '\|Active=TRUE\|' -and $v -match '\|Dir=In\|') { [ordered]@{ id = [string]$n; src = $src.who; raw = $v } }
+      }
+    }
+  } catch { $fwOk = $false })
+  # Settings: only on/off facts are sent, never a stored value (e.g. no auto-logon password).
+  $settings = try {
+    $reg = { param($p, $n) try { (Get-ItemProperty -LiteralPath $p -Name $n -ErrorAction Stop).$n } catch { $null } }
+    $ts = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+    $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+    $smb1 = try { [bool](Get-SmbServerConfiguration -ErrorAction Stop).EnableSMB1Protocol } catch { $null }
+    $users = @(try { Get-LocalUser -ErrorAction Stop | Where-Object { $_.Enabled } | ForEach-Object { [ordered]@{ name = [string]$_.Name; sid = [string]$_.SID.Value } } } catch { })
+    [ordered]@{
+      rdp = ((& $reg $ts 'fDenyTSConnections') -eq 0)
+      rdpNla = ((& $reg "$ts\WinStations\RDP-Tcp" 'UserAuthentication') -ne 0)
+      lsaPpl = (@(1, 2) -contains (& $reg 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' 'RunAsPPL'))
+      wdigest = ((& $reg 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest' 'UseLogonCredential') -eq 1)
+      autoLogonPassword = ([string](& $reg $wl 'AutoAdminLogon') -eq '1' -and $null -ne (& $reg $wl 'DefaultPassword'))
+      smartScreenOff = ((& $reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' 'EnableSmartScreen') -eq 0 -or [string](& $reg 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer' 'SmartScreenEnabled') -eq 'Off')
+      smb1 = $smb1
+      users = $users
+    }
+  } catch { $setOk = $false; $null }
+  [ordered]@{ certs = $certs; certsOk = $certsOk; firewall = $fw; firewallOk = $fwOk; settings = $settings; settingsOk = $setOk }
+}
+
 [ordered]@{
   isAdmin = $isAdmin
   defender = $defender
@@ -162,4 +224,5 @@ $network = Try-Get {
   software = $software
   listeners = $listeners
   network = $network
+  system = $system
 } | ConvertTo-Json -Depth 5 -Compress

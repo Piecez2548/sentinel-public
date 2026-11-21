@@ -45,6 +45,17 @@ export function plainFinding(f: Input): PlainText | null {
       if (f.severity === 'high') return { title: `${what}ใหม่ ไม่รู้ว่าใครสร้าง: ${name}`, summary: 'ไม่มีลายเซ็นยืนยัน หรือชี้ไปที่ไฟล์ที่ไม่มีอยู่แล้ว', fix: `ถ้าไม่ได้ติดตั้งเอง: ${fix}` };
       return { title: `${what}ใหม่: ${name}`, summary: 'ตรวจไม่ได้ว่าใครสร้าง', fix: `ถ้าไม่รู้จัก: ${fix}` };
     }
+    case 'system_changed': {
+      const th = str(d.headlineTh);
+      const section = str(d.section);
+      const name = str(d.name);
+      const low = f.severity === 'low';
+      const fix =
+        section === 'cert' ? `กด Win+R พิมพ์ ${str(d.store) === 'user' ? 'certmgr.msc' : 'certlm.msc'} → Trusted Root Certification Authorities → Certificates → คลิกขวา "${name}" → Delete`
+        : section === 'firewall' ? `Start → พิมพ์ "Windows Defender Firewall with Advanced Security" → Inbound Rules → หา "${name}" → คลิกขวา → Disable Rule`
+        : 'ดูวิธีเปลี่ยนกลับในข้อความแจ้งเตือน หรือเปิดรายละเอียดเรื่องนี้';
+      return { title: th || f.title, summary: low ? 'ดูไม่อันตราย ถ้าคุณติดตั้งหรือเปิดเองก็ไม่ต้องทำอะไร' : str(d.assessment) || f.summary, fix: `${f.severity !== 'high' ? 'ถ้าไม่ได้ทำเอง: ' : ''}${fix}${f.severity === 'high' ? ' แล้วสแกน Full scan' : ''}` };
+    }
     case 'network_changed': {
       const th = str(d.headlineTh);
       const reason = str(d.reason);

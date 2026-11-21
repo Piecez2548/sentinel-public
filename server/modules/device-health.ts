@@ -20,6 +20,7 @@ import { appKey, iconExe, judgeApp, newApps, pickExes, programMessage, removedKe
 import { diffExtensions, extensionMessage, judgeExt, trimExtEvents, type ExtBaseline, type ExtEvent, type ExtProfile, type ExtVerdict } from '../lib/browser-ext.js';
 import { readBrowserExtensions } from '../lib/browser-ext-read.js';
 import { diffNet, keyParts, netMessage, trimNetEvents, type NetBaseline, type NetEvent, type NetSnap } from '../lib/net-watch.js';
+import { diffSys, expandApp, judgeSys, sectionOf, settingName, sysMessage, trimSysEvents, type Sig, type SysBaseline, type SysEvent, type SysItem, type SysSnap } from '../lib/sys-watch.js';
 import { upsertFinding } from './detection.js';
 import { getLocalAssetId } from './host-collector.js';
 
@@ -54,6 +55,8 @@ export type Snapshot = {
   listeners?: Listener[] | null;
   /* Added 2026-11-20: hosts file, hand-typed DNS, proxies. */
   network?: NetSnap | null;
+  /* Added 2026-11-21: trusted root certificates, inbound firewall allow rules, security settings. */
+  system?: SysSnap | null;
   /** Tests only: browser profiles (the live server reads them itself). */
   extensions?: ExtProfile[] | null;
 };
@@ -486,6 +489,102 @@ function watchNetwork(assetId: number, n: NetSnap | null | undefined, now: numbe
   };
 }
 
+/* ---------- root certificates, firewall rules, security settings ---------- */
+
+const SYS_BASELINE = 'device_system_baseline';
+const SYS_EVENTS = 'device_system_events';
+const sysFp = (assetId: number, key: string) => `system_changed:${assetId}:${createHash('sha1').update(key).digest('hex').slice(0, 16)}`;
+
+export type SysSummary = {
+  baselineAt: number | null;
+  added: number;
+  certs: { total: number; added: number; byHand: { name: string; store: string; until?: string }[] };
+  firewall: { total: number; open: number };
+  settings: { id: string; name: string }[];
+  readable: { cert: boolean; firewall: boolean; setting: boolean };
+};
+
+export function systemEvents(): SysEvent[] {
+  return parseJson<SysEvent[]>(getSetting(SYS_EVENTS) ?? '[]', []);
+}
+
+/** Signature of the program a new firewall rule lets in (missing file = leftover rule). Read-only. */
+async function ruleSig(it: SysItem): Promise<Sig | undefined> {
+  const r = it.rule;
+  if (!r?.app || r.builtin || /^system$/i.test(r.app)) return undefined;
+  const p = expandApp(r.app);
+  if (!/^[a-z]:\\/i.test(p)) return undefined;
+  if (!existsSync(p)) return { state: 'missing' };
+  const s = await checkSignature(`"${p}"`);
+  return s.state === 'signed' ? { state: 'signed', signer: s.signer } : { state: s.state };
+}
+
+async function watchSystem(assetId: number, n: SysSnap | null | undefined, now: number): Promise<SysSummary | null> {
+  if (!n) return null;
+  const raw = getSetting(SYS_BASELINE);
+  const base = raw ? parseJson<SysBaseline | null>(raw, null) : null;
+  const { changes, next, items } = diffSys(n, base);
+  const events = systemEvents();
+  let added = 0;
+  for (const c of changes) {
+    if (c.kind === 'removed') {
+      events.push({ kind: 'removed', section: sectionOf(c.key), name: c.name, value: '', at: now });
+      run("UPDATE security_findings SET status = 'resolved', resolved_at = ?, note = 'Removed or switched back — auto-resolved' WHERE fingerprint = ? AND status IN ('open','acknowledged')", now, sysFp(assetId, c.key));
+      continue;
+    }
+    const it = c.item;
+    const v = judgeSys(it, await ruleSig(it));
+    events.push({ kind: 'added', section: it.section, name: it.name, value: it.section === 'cert' ? it.cert!.store : it.value, at: now, severity: v.severity, reason: v.reason });
+    if (++added > MAX_FINDINGS_PER_RUN) continue;
+    const msg = sysMessage(it, v, assetLabel(assetId));
+    upsertFinding({
+      notify: { en: msg.en, th: msg.th },
+      ruleId: 'system_changed',
+      assetId,
+      severity: v.severity,
+      title: msg.headlineEn,
+      summary: v.detail,
+      fingerprint: sysFp(assetId, it.key),
+      condition: 'New since the last device check · root certificates / firewall rules / security settings',
+      extra: {
+        details: {
+          section: it.section,
+          name: it.name,
+          value: it.value,
+          store: it.cert?.store,
+          subject: it.cert?.subject,
+          thumbprint: it.cert?.thumb,
+          until: it.cert?.until,
+          app: it.rule ? expandApp(it.rule.app) : undefined,
+          rule: it.rule ? { ports: it.rule.ports, protocol: it.rule.protocol, profile: it.rule.profile, remote: it.rule.remote, source: it.rule.src } : undefined,
+          reason: v.reason,
+          assessment: v.detail,
+          headlineTh: msg.headlineTh,
+          headlineEn: msg.headlineEn,
+        },
+      },
+      mergeWindowMs: 365 * DAY,
+    });
+  }
+  if (!base) setSetting('device_system_baseline_at', String(now));
+  setSetting(SYS_BASELINE, JSON.stringify(next));
+  setSetting(SYS_EVENTS, JSON.stringify(trimSysEvents(events, now)));
+  const certs = items.filter((i) => i.section === 'cert');
+  const rules = items.filter((i) => i.section === 'firewall');
+  return {
+    baselineAt: Number(getSetting('device_system_baseline_at')) || null,
+    added,
+    certs: {
+      total: certs.length,
+      added: certs.filter((c) => c.cert!.store !== 'authroot').length,
+      byHand: certs.filter((c) => c.cert!.store !== 'authroot').slice(0, 40).map((c) => ({ name: c.name, store: c.cert!.store, until: c.cert!.until })),
+    },
+    firewall: { total: rules.length, open: rules.filter((r) => !r.rule!.builtin).length },
+    settings: items.filter((i) => i.section === 'setting').map((i) => ({ id: i.setting!, name: settingName(i.setting!) })),
+    readable: { cert: n.certsOk !== false && n.certs != null, firewall: n.firewallOk !== false && n.firewall != null, setting: n.settingsOk !== false && n.settings != null },
+  };
+}
+
 /* ---------- Tailscale devices (e.g. the phone) ---------- */
 
 export type TailDevice = { name: string; os: string; online: boolean; lastSeen: string | null; self: boolean };
@@ -519,6 +618,7 @@ type Latest = {
   programs?: { count: number; baselineAt: number | null; added: number } | null;
   extensions?: ExtSummary | null;
   network?: NetSummary | null;
+  system?: SysSummary | null;
 };
 
 const AUTO_NOTE = 'Fixed — auto-resolved by the device health check';
@@ -691,6 +791,10 @@ async function collect(): Promise<Latest | null> {
   const network = watchNetwork(assetId, s.network, now);
   if (network?.added) changed = true;
 
+  // Trusted root certificates, inbound firewall allow rules, security settings.
+  const system = await watchSystem(assetId, s.system, now);
+  if (system?.added) changed = true;
+
   const latest: Latest = {
     at: now,
     isAdmin: s.isAdmin,
@@ -705,6 +809,7 @@ async function collect(): Promise<Latest | null> {
     programs,
     extensions,
     network,
+    system,
   };
   setSetting('device_health_latest', JSON.stringify(latest));
   const bad = checks.filter((c) => c.status === 'bad').length;
@@ -725,12 +830,13 @@ deviceRouter.get('/', (_req, res) => {
   // Open findings about auto-start programs / exclusions (the "flagged" list of one run is only what changed then).
   const findings = all<{ id: number; rule_id: string; severity: string; title: string; summary: string; evidence: string; last_seen: number }>(
     `SELECT id, rule_id, severity, title, summary, evidence, last_seen FROM security_findings
-     WHERE rule_id IN ('persistence_added','defender_exclusion_added','program_installed','browser_extension','network_changed') AND status IN ('open','acknowledged') ORDER BY last_seen DESC LIMIT 50`,
+     WHERE rule_id IN ('persistence_added','defender_exclusion_added','program_installed','browser_extension','network_changed','system_changed') AND status IN ('open','acknowledged') ORDER BY last_seen DESC LIMIT 50`,
   ).map((f) => ({ id: f.id, ruleId: f.rule_id, severity: f.severity, title: f.title, summary: f.summary, lastSeen: f.last_seen, plainTh: plainFinding({ ruleId: f.rule_id, severity: f.severity, title: f.title, summary: f.summary, evidence: parseJson(f.evidence, {}) }) }));
   const recentPrograms = programEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
   const recentExtensions = extensionEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
   const recentNetwork = networkEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
-  res.json({ latest, labels: CHECK_LABELS, findings, recentPrograms, recentExtensions, recentNetwork, everyMs: DEVICE_HEALTH_EVERY_MS, running: running != null });
+  const recentSystem = systemEvents().filter((e) => Date.now() - e.at < 30 * DAY).reverse().slice(0, 30);
+  res.json({ latest, labels: CHECK_LABELS, findings, recentPrograms, recentExtensions, recentNetwork, recentSystem, everyMs: DEVICE_HEALTH_EVERY_MS, running: running != null });
 });
 
 deviceRouter.post('/refresh', async (req, res) => {

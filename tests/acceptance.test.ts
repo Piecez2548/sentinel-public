@@ -48,6 +48,14 @@ const DEVICE_SNAPSHOT = JSON.stringify({
   startup: [{ name: 'svchost', command: 'C:\\Users\\Me\\AppData\\Local\\svchost.exe', location: 'HKU\\S-1\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run', user: 'PC\\me' }],
   tasks: [],
   software: { programs: ['Git'], services: [], apps: [{ name: 'Git 2.44.0', publisher: 'The Git Development Community' }] },
+  system: {
+    certs: [{ thumb: 'CAFE01', subject: 'CN=Microsoft Root Certificate Authority 2011, O=Microsoft Corporation', store: 'machine' }],
+    certsOk: true,
+    firewall: [{ id: 'ts1', src: 'local', raw: 'v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=17|App=C:\\Program Files\\Tailscale\\tailscaled.exe|Name=Tailscale-Process|' }],
+    firewallOk: true,
+    settings: { rdp: false, rdpNla: true, lsaPpl: true, wdigest: false, autoLogonPassword: false, smartScreenOff: false, smb1: false, users: [{ name: 'me', sid: 'S-1-5-21-1-2-3-1001' }] },
+    settingsOk: true,
+  },
   network: { hosts: ['100.64.0.20 phone.tail.ts.net. phone'], hostsOk: true, dns: [{ iface: '{a}', name: 'Wi-Fi', servers: ['8.8.8.8'] }], dnsOk: true, proxies: [], proxyOk: true, winhttp: '', nrpt: [], nrptOk: true },
   extensions: [{ browser: 'Brave', profile: 'Default', ok: true, exts: [{ browser: 'Brave', profile: 'Default', id: 'aaaa', name: 'Dark Reader', location: 1, fromStore: true, apis: ['storage'], hosts: [] }] }],
 });
@@ -479,6 +487,11 @@ describe('Monitoring & alerting', () => {
     // …and something pointed the bank at another server and turned on a proxy.
     fixed.network.hosts.push('203.0.113.9 www.kasikornbank.com');
     fixed.network.proxies = [{ who: 'S-1-5-21-9-1001', server: '127.0.0.1:8888' }];
+    // …and planted a root certificate, opened the firewall for a program in Temp, and turned on WDigest + SMB1.
+    fixed.system.certs.push({ thumb: 'BAD0001', subject: 'CN=Totally Legit Root CA', store: 'user' });
+    fixed.system.firewall.push({ id: 'evil', src: 'local', raw: 'v2.33|Action=Allow|Active=TRUE|Dir=In|App=C:\\Users\\me\\AppData\\Local\\Temp\\upd\\svch0st.exe|Name=Windows Update Helper|' });
+    fixed.system.settings.wdigest = true;
+    fixed.system.settings.smb1 = true;
     fixed.extensions[0].exts.push({ browser: 'Brave', profile: 'Default', id: 'bbbb', name: 'Free VPN', location: 4, fromStore: false, apis: ['proxy'], hosts: ['<all_urls>'] });
     await stopServer();
     await startServer({ SENTINEL_TEST_DEVICE_SNAPSHOT: JSON.stringify(fixed) });
@@ -497,6 +510,11 @@ describe('Monitoring & alerting', () => {
     assert.deepEqual(exts.map((f) => f.severity), ['high'], 'only the sideloaded extension, as high');
     assert.deepEqual(active.filter((f) => f.ruleId === 'network_changed').map((f) => f.severity).sort(), ['high', 'medium'], 'fake bank line high, local proxy medium');
     assert.equal(dev.latest.network.hosts.length, 1, 'Tailscale line not counted');
+    const sys = active.filter((f) => f.ruleId === 'system_changed').map((f) => f.severity).sort();
+    assert.deepEqual(sys, ['high', 'high', 'high', 'medium'], 'unknown root, temp-folder firewall rule, WDigest → high; SMB1 → medium');
+    assert.deepEqual(dev.latest.system.settings.map((x: { id: string }) => x.id), ['wdigest', 'smb1']);
+    assert.equal(dev.latest.system.certs.added, 2);
+    assert.equal(dev.recentSystem.length, 4);
     assert.equal(dev.latest.extensions.count, 2);
     assert.deepEqual(dev.recentExtensions.map((e: { kind: string; name: string }) => `${e.kind}:${e.name}`), ['added:Free VPN']);
     await stopServer();
@@ -507,6 +525,7 @@ describe('Monitoring & alerting', () => {
     assert.ok(!after.some((f) => f.ruleId === 'program_installed'), 'uninstalled → its finding is resolved');
     assert.ok(!after.some((f) => f.ruleId === 'browser_extension'), 'extension removed → its finding is resolved');
     assert.ok(!after.some((f) => f.ruleId === 'network_changed'), 'hosts line and proxy removed → resolved');
+    assert.ok(!after.some((f) => f.ruleId === 'system_changed'), 'certificate and rule removed, settings switched back → resolved');
     const ev = (await call('GET', '/device-health', undefined, session)).body.recentPrograms as { kind: string }[];
     assert.equal(ev[0].kind, 'removed');
   });

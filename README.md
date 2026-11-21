@@ -20,11 +20,12 @@ It runs on the PC itself (Node 22, SQLite, no Docker, no cloud backend) and list
 | **New programs** | Anything new in the installed-programs list. Unsigned programs, modified signatures (e.g. `HashMismatch`) and crack/repack names are flagged. |
 | **Browser extensions** | Chrome, Brave, Edge, Vivaldi and Opera. Sideloaded or policy-forced extensions, broad permissions, and updates that quietly add permissions. |
 | **Hosts / DNS / proxy** | Hosts lines that fake or block banks, Google, Microsoft, Defender or Telegram. Unknown DNS servers, remote proxies, PAC scripts, WinHTTP proxy, NRPT rules. |
+| **Certificates, firewall, security switches** | New trusted root certificates (which let someone fake any site's padlock), new inbound firewall allow rules judged by program signature, folder and port, and switches such as Remote Desktop, WDigest, LSA protection, SmartScreen, SMB1 and the Guest account. |
 | **Defender scans** | Start quick/full/offline scans from the phone; the result arrives on Telegram. Optional weekly automatic quick scan. |
 | **Websites / APIs** | HTTP status, latency, keyword, TLS expiry, security headers (SSRF-guarded) |
 | **SENTINEL itself** | Password guessing, correct password with a wrong 2FA code, sign-in from a new device, plus a dead man's switch via healthchecks.io |
 
-There are **32 detection rules** with adjustable thresholds. Every finding carries the log lines or values behind it, and most findings close on their own once the problem is fixed.
+There are **33 detection rules** with adjustable thresholds. Every finding carries the log lines or values behind it, and most findings close on their own once the problem is fixed.
 
 ## Alerting and response
 
